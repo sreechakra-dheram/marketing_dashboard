@@ -2,6 +2,7 @@ import os
 import json
 import functools
 import requests
+from urllib.parse import quote
 from flask import Flask, jsonify, redirect, request, session, url_for
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -439,10 +440,11 @@ class LinkedInService:
                 "X-Restli-Protocol-Version": "2.0.0",
             }
             org_urn = f"urn:li:organization:{LINKEDIN_ORGANIZATION_ID}"
+            org_urn_encoded = quote(org_urn, safe="")
 
-            # Follower count
+            # Follower count — URN must be URL-encoded in the path
             follower_resp = requests.get(
-                f"{LinkedInService.BASE}/networkSizes/{org_urn}",
+                f"{LinkedInService.BASE}/networkSizes/{org_urn_encoded}",
                 params={"edgeType": "CompanyFollowedByMember"},
                 headers=headers,
                 timeout=10,
@@ -511,20 +513,24 @@ class MetaService:
         try:
             # ── Facebook ──
             if fb_token and fb_page:
+                since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                until = datetime.now().strftime("%Y-%m-%d")
+
+                # page_fans is a lifetime metric — must NOT be mixed with period=day
                 fb_insights_resp = requests.get(
                     f"{MetaService.GRAPH}/{fb_page}/insights",
                     params={
-                        "metric": "page_post_engagements,page_impressions,page_fans",
+                        "metric": "page_post_engagements,page_impressions",
                         "period": "day",
-                        "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
-                        "until": datetime.now().strftime("%Y-%m-%d"),
+                        "since": since,
+                        "until": until,
                         "access_token": fb_token,
                     },
                     timeout=10,
                 )
+                fb_likes = 0
+                fb_impressions = 0
                 if fb_insights_resp.ok:
-                    fb_likes = 0
-                    fb_impressions = 0
                     for metric in fb_insights_resp.json().get("data", []):
                         values = metric.get("values", [])
                         total = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
@@ -532,29 +538,29 @@ class MetaService:
                             fb_likes = total
                         elif metric["name"] == "page_impressions":
                             fb_impressions = total
+                else:
+                    print(f"FB insights error {fb_insights_resp.status_code}: {fb_insights_resp.text[:300]}")
 
-                    fb_posts_resp = requests.get(
-                        f"{MetaService.GRAPH}/{fb_page}/posts",
-                        params={"fields": "id", "limit": 100, "access_token": fb_token},
-                        timeout=10,
-                    )
-                    fb_post_count = len(fb_posts_resp.json().get("data", [])) if fb_posts_resp.ok else 0
-                    result["facebook"] = {
-                        "postCount": fb_post_count,
-                        "likes": int(fb_likes),
-                        "impressions": int(fb_impressions),
-                        "clicks": 0,
-                    }
+                fb_posts_resp = requests.get(
+                    f"{MetaService.GRAPH}/{fb_page}/posts",
+                    params={"fields": "id", "limit": 100, "access_token": fb_token},
+                    timeout=10,
+                )
+                fb_post_count = len(fb_posts_resp.json().get("data", [])) if fb_posts_resp.ok else 0
+                result["facebook"] = {
+                    "postCount": fb_post_count,
+                    "likes": int(fb_likes),
+                    "impressions": int(fb_impressions),
+                    "clicks": 0,
+                }
 
             # ── Instagram ──
             if ig_token and ig_acct:
                 ig_insights_resp = requests.get(
                     f"{MetaService.GRAPH}/{ig_acct}/insights",
                     params={
-                        "metric": "impressions,reach,profile_views",
-                        "period": "day",
-                        "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
-                        "until": datetime.now().strftime("%Y-%m-%d"),
+                        "metric": "impressions,reach",
+                        "period": "week",
                         "access_token": ig_token,
                     },
                     timeout=10,
@@ -563,7 +569,10 @@ class MetaService:
                 if ig_insights_resp.ok:
                     for metric in ig_insights_resp.json().get("data", []):
                         if metric["name"] == "impressions":
-                            ig_impressions = sum(v.get("value", 0) for v in metric.get("values", []))
+                            values = metric.get("values", [])
+                            ig_impressions = values[-1].get("value", 0) if values else 0
+                else:
+                    print(f"IG insights error {ig_insights_resp.status_code}: {ig_insights_resp.text[:300]}")
 
                 ig_media_resp = requests.get(
                     f"{MetaService.GRAPH}/{ig_acct}/media",

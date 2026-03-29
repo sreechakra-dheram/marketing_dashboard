@@ -34,6 +34,23 @@ const ORG_CONFIG = {
   linkstone: { name: 'Linkstone',  supportedTabs: ['ga4', 'gsc', 'social'] },
 };
 
+// Always-visible tabs regardless of org
+const ALWAYS_VISIBLE_TABS = ['twitter', 'google-ads'];
+
+function updateTabBar(org) {
+  const supported = ORG_CONFIG[org]?.supportedTabs || [];
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    const tab = btn.dataset.tab;
+    if (ALWAYS_VISIBLE_TABS.includes(tab)) return; // always show
+    btn.style.display = supported.includes(tab) ? '' : 'none';
+  });
+
+  // If active tab just got hidden, switch to first supported tab
+  if (!supported.includes(activeTab) && !ALWAYS_VISIBLE_TABS.includes(activeTab)) {
+    switchTab(supported[0] || 'ga4');
+  }
+}
+
 // ── API ────────────────────────────────────────────────────────
 const API = window.location.origin + '/api';
 
@@ -186,16 +203,15 @@ function handleOrgChange(newOrg) {
 
   // Restore any panels that were replaced with "not available"
   ['tab-linkedin', 'tab-youtube', 'tab-social', 'tab-ga4', 'tab-gsc'].forEach(id => {
-    if (panelOriginalHTML[id]) {
-      restorePanel(id);
-    }
+    if (panelOriginalHTML[id]) restorePanel(id);
   });
 
-  // Reload active tab
-  const orgCfg = ORG_CONFIG[currentOrg];
-  if (orgCfg && !orgCfg.supportedTabs.includes(activeTab)) {
-    showNotAvailable('tab-' + activeTab);
-  } else {
+  // Show/hide tabs for this org (may also call switchTab if active tab is hidden)
+  updateTabBar(newOrg);
+
+  // If active tab is still valid, reload it
+  const supported = ORG_CONFIG[currentOrg]?.supportedTabs || [];
+  if (supported.includes(activeTab) || ALWAYS_VISIBLE_TABS.includes(activeTab)) {
     loadTab(activeTab);
   }
 }
@@ -804,6 +820,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Apply tab visibility for default org on load
+  updateTabBar(currentOrg);
 
   // Load GA4 by default
   switchTab('ga4');
