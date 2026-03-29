@@ -34,7 +34,8 @@ LINKEDIN_ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
 LINKEDIN_ORGANIZATION_ID = os.getenv("LINKEDIN_ORGANIZATION_ID")
 
 # Meta
-META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
+FACEBOOK_ACCESS_TOKEN = os.getenv("FACEBOOK_ACCESS_TOKEN")
+INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
 INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
 
@@ -465,8 +466,8 @@ class MetaService:
 
     @staticmethod
     def get_meta_report():
-        if not META_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
-            return {"error": "META_ACCESS_TOKEN and FACEBOOK_PAGE_ID not configured"}, 500
+        if not FACEBOOK_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
+            return {"error": "FACEBOOK_ACCESS_TOKEN and FACEBOOK_PAGE_ID not configured"}, 500
 
         try:
             # Facebook Page insights
@@ -477,7 +478,7 @@ class MetaService:
                     "period": "day",
                     "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
                     "until": datetime.now().strftime("%Y-%m-%d"),
-                    "access_token": META_ACCESS_TOKEN,
+                    "access_token": FACEBOOK_ACCESS_TOKEN,
                 },
                 timeout=10,
             )
@@ -497,7 +498,7 @@ class MetaService:
             # Facebook posts count
             fb_posts_resp = requests.get(
                 f"{MetaService.GRAPH}/{FACEBOOK_PAGE_ID}/posts",
-                params={"fields": "id", "limit": 100, "access_token": META_ACCESS_TOKEN},
+                params={"fields": "id", "limit": 100, "access_token": FACEBOOK_ACCESS_TOKEN},
                 timeout=10,
             )
             fb_posts_resp.raise_for_status()
@@ -519,8 +520,8 @@ class MetaService:
                 },
             }
 
-            # Instagram (if configured)
-            if INSTAGRAM_BUSINESS_ACCOUNT_ID:
+            # Instagram (if configured with its own token)
+            if INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID:
                 ig_insights_resp = requests.get(
                     f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/insights",
                     params={
@@ -528,7 +529,7 @@ class MetaService:
                         "period": "day",
                         "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
                         "until": datetime.now().strftime("%Y-%m-%d"),
-                        "access_token": META_ACCESS_TOKEN,
+                        "access_token": INSTAGRAM_ACCESS_TOKEN,
                     },
                     timeout=10,
                 )
@@ -540,7 +541,7 @@ class MetaService:
 
                     ig_media_resp = requests.get(
                         f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/media",
-                        params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": META_ACCESS_TOKEN},
+                        params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": INSTAGRAM_ACCESS_TOKEN},
                         timeout=10,
                     )
                     ig_media = ig_media_resp.json().get("data", []) if ig_media_resp.ok else []
@@ -548,7 +549,7 @@ class MetaService:
 
                     ig_info_resp = requests.get(
                         f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}",
-                        params={"fields": "followers_count", "access_token": META_ACCESS_TOKEN},
+                        params={"fields": "followers_count", "access_token": INSTAGRAM_ACCESS_TOKEN},
                         timeout=10,
                     )
                     ig_followers = ig_info_resp.json().get("followers_count", 0) if ig_info_resp.ok else 0
