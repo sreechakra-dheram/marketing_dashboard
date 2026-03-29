@@ -1,6 +1,7 @@
 import os
 import json
 import functools
+import requests
 from flask import Flask, jsonify, redirect, request, session, url_for
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -27,6 +28,19 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-production"
 
 PROPERTY_ID = os.getenv("GA4_PROPERTY_ID")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
+
+# LinkedIn
+LINKEDIN_ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
+LINKEDIN_ORGANIZATION_ID = os.getenv("LINKEDIN_ORGANIZATION_ID")
+
+# Meta
+META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+
+# Twitter/X
+TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+TWITTER_USER_ID = os.getenv("TWITTER_USER_ID")
 
 # OAuth 2.0 config (used for one-time YouTube auth)
 OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
@@ -376,6 +390,235 @@ class YouTubeService:
             return {"error": str(e)}, 500
 
 
+# ─── LinkedIn Service ────────────────────────────────────────────────────────
+
+class LinkedInService:
+    BASE = "https://api.linkedin.com/v2"
+
+    @staticmethod
+    def get_linkedin_report():
+        if not LINKEDIN_ACCESS_TOKEN or not LINKEDIN_ORGANIZATION_ID:
+            return {"error": "LINKEDIN_ACCESS_TOKEN and LINKEDIN_ORGANIZATION_ID not configured"}, 500
+
+        try:
+            headers = {
+                "Authorization": f"Bearer {LINKEDIN_ACCESS_TOKEN}",
+                "X-Restli-Protocol-Version": "2.0.0",
+            }
+            org_urn = f"urn:li:organization:{LINKEDIN_ORGANIZATION_ID}"
+
+            # Follower count
+            follower_resp = requests.get(
+                f"{LinkedInService.BASE}/networkSizes/{org_urn}",
+                params={"edgeType": "CompanyFollowedByMember"},
+                headers=headers,
+                timeout=10,
+            )
+            follower_resp.raise_for_status()
+            follower_count = follower_resp.json().get("firstDegreeSize", 0)
+
+            # Recent posts (ugcPosts)
+            posts_resp = requests.get(
+                f"{LinkedInService.BASE}/ugcPosts",
+                params={"q": "authors", "authors": f"List({org_urn})", "count": 10},
+                headers=headers,
+                timeout=10,
+            )
+            posts_resp.raise_for_status()
+            posts_data = posts_resp.json()
+            post_elements = posts_data.get("elements", [])
+            post_count = posts_data.get("paging", {}).get("total", len(post_elements))
+
+            # Aggregate likes and reposts from share statistics
+            total_likes = 0
+            total_reposts = 0
+            for post in post_elements:
+                post_urn = post.get("id", "")
+                stats_resp = requests.get(
+                    f"{LinkedInService.BASE}/organizationalEntityShareStatistics",
+                    params={"q": "organizationalEntity", "organizationalEntity": org_urn, "ugcPosts": f"List({post_urn})"},
+                    headers=headers,
+                    timeout=10,
+                )
+                if stats_resp.ok:
+                    for el in stats_resp.json().get("elements", []):
+                        total_stats = el.get("totalShareStatistics", {})
+                        total_likes += total_stats.get("likeCount", 0)
+                        total_reposts += total_stats.get("shareCount", 0)
+
+            return {
+                "followerCount": follower_count,
+                "postCount": post_count,
+                "totalLikes": total_likes,
+                "totalReposts": total_reposts,
+            }, 200
+
+        except Exception as e:
+            print(f"Error fetching LinkedIn data: {e}")
+            return {"error": str(e)}, 500
+
+
+# ─── Meta Service (Facebook + Instagram) ────────────────────────────────────
+
+class MetaService:
+    GRAPH = "https://graph.facebook.com/v19.0"
+
+    @staticmethod
+    def get_meta_report():
+        if not META_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
+            return {"error": "META_ACCESS_TOKEN and FACEBOOK_PAGE_ID not configured"}, 500
+
+        try:
+            # Facebook Page insights
+            fb_insights_resp = requests.get(
+                f"{MetaService.GRAPH}/{FACEBOOK_PAGE_ID}/insights",
+                params={
+                    "metric": "page_post_engagements,page_impressions,page_fans",
+                    "period": "day",
+                    "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    "until": datetime.now().strftime("%Y-%m-%d"),
+                    "access_token": META_ACCESS_TOKEN,
+                },
+                timeout=10,
+            )
+            fb_insights_resp.raise_for_status()
+            fb_insights = fb_insights_resp.json().get("data", [])
+
+            fb_likes = 0
+            fb_impressions = 0
+            for metric in fb_insights:
+                values = metric.get("values", [])
+                total = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
+                if metric["name"] == "page_post_engagements":
+                    fb_likes = total
+                elif metric["name"] == "page_impressions":
+                    fb_impressions = total
+
+            # Facebook posts count
+            fb_posts_resp = requests.get(
+                f"{MetaService.GRAPH}/{FACEBOOK_PAGE_ID}/posts",
+                params={"fields": "id", "limit": 100, "access_token": META_ACCESS_TOKEN},
+                timeout=10,
+            )
+            fb_posts_resp.raise_for_status()
+            fb_post_count = len(fb_posts_resp.json().get("data", []))
+
+            result = {
+                "facebook": {
+                    "postCount": fb_post_count,
+                    "likes": int(fb_likes),
+                    "impressions": int(fb_impressions),
+                    "clicks": 0,
+                },
+                "instagram": {
+                    "postCount": 0,
+                    "likes": 0,
+                    "impressions": 0,
+                    "clicks": 0,
+                    "followerCount": 0,
+                },
+            }
+
+            # Instagram (if configured)
+            if INSTAGRAM_BUSINESS_ACCOUNT_ID:
+                ig_insights_resp = requests.get(
+                    f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/insights",
+                    params={
+                        "metric": "impressions,reach,profile_views",
+                        "period": "day",
+                        "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                        "until": datetime.now().strftime("%Y-%m-%d"),
+                        "access_token": META_ACCESS_TOKEN,
+                    },
+                    timeout=10,
+                )
+                if ig_insights_resp.ok:
+                    ig_impressions = 0
+                    for metric in ig_insights_resp.json().get("data", []):
+                        if metric["name"] == "impressions":
+                            ig_impressions = sum(v.get("value", 0) for v in metric.get("values", []))
+
+                    ig_media_resp = requests.get(
+                        f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/media",
+                        params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": META_ACCESS_TOKEN},
+                        timeout=10,
+                    )
+                    ig_media = ig_media_resp.json().get("data", []) if ig_media_resp.ok else []
+                    ig_likes = sum(m.get("like_count", 0) for m in ig_media)
+
+                    ig_info_resp = requests.get(
+                        f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}",
+                        params={"fields": "followers_count", "access_token": META_ACCESS_TOKEN},
+                        timeout=10,
+                    )
+                    ig_followers = ig_info_resp.json().get("followers_count", 0) if ig_info_resp.ok else 0
+
+                    result["instagram"] = {
+                        "postCount": len(ig_media),
+                        "likes": ig_likes,
+                        "impressions": int(ig_impressions),
+                        "clicks": 0,
+                        "followerCount": ig_followers,
+                    }
+
+            return result, 200
+
+        except Exception as e:
+            print(f"Error fetching Meta data: {e}")
+            return {"error": str(e)}, 500
+
+
+# ─── Twitter/X Service ────────────────────────────────────────────────────────
+
+class TwitterService:
+    BASE = "https://api.twitter.com/2"
+
+    @staticmethod
+    def get_twitter_report():
+        if not TWITTER_BEARER_TOKEN or not TWITTER_USER_ID:
+            return {"error": "TWITTER_BEARER_TOKEN and TWITTER_USER_ID not configured"}, 500
+
+        try:
+            headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+
+            # Recent tweets (last 7 days)
+            start_time = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            tweets_resp = requests.get(
+                f"{TwitterService.BASE}/users/{TWITTER_USER_ID}/tweets",
+                params={
+                    "start_time": start_time,
+                    "tweet.fields": "public_metrics",
+                    "max_results": 100,
+                },
+                headers=headers,
+                timeout=10,
+            )
+            tweets_resp.raise_for_status()
+            tweets_data = tweets_resp.json()
+            tweets = tweets_data.get("data", [])
+
+            total_impressions = 0
+            total_likes = 0
+            total_clicks = 0
+
+            for tweet in tweets:
+                metrics = tweet.get("public_metrics", {})
+                total_impressions += metrics.get("impression_count", 0)
+                total_likes += metrics.get("like_count", 0)
+                total_clicks += metrics.get("url_link_clicks", 0)
+
+            return {
+                "postCount": len(tweets),
+                "impressions": total_impressions,
+                "likes": total_likes,
+                "clicks": total_clicks,
+            }, 200
+
+        except Exception as e:
+            print(f"Error fetching Twitter data: {e}")
+            return {"error": str(e)}, 500
+
+
 # ─── API Endpoints ───────────────────────────────────────────────────────────
 
 @app.route("/api/ga4", methods=["GET"])
@@ -465,6 +708,32 @@ def youtube_debug():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/linkedin", methods=["GET"])
+def get_linkedin_data():
+    data, status_code = LinkedInService.get_linkedin_report()
+    return jsonify(data), status_code
+
+
+@app.route("/api/social/meta", methods=["GET"])
+def get_meta_data():
+    data, status_code = MetaService.get_meta_report()
+    return jsonify(data), status_code
+
+
+@app.route("/api/social/twitter", methods=["GET"])
+def get_twitter_data():
+    data, status_code = TwitterService.get_twitter_report()
+    return jsonify(data), status_code
+
+
+@app.route("/api/google-ads", methods=["GET"])
+def get_google_ads_data():
+    return jsonify({
+        "status": "pending",
+        "message": "Google Ads integration pending developer account approval",
+    }), 200
 
 
 if __name__ == "__main__":

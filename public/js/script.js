@@ -14,7 +14,7 @@ let ytSubsChartInstance = null;
 const API_BASE_URL = window.location.origin + '/api';
 
 // Track which tabs have loaded data
-const tabLoaded = { ga4: false, gsc: false, youtube: false };
+const tabLoaded = { ga4: false, gsc: false, youtube: false, linkedin: false, social: false, 'google-ads': false };
 
 function formatDateString(dateStr) {
     if (!dateStr || dateStr.length !== 8) return dateStr;
@@ -61,6 +61,9 @@ function switchTab(tabName) {
     if (tabName === 'ga4' && !tabLoaded.ga4) { fetchGA4Data(); }
     if (tabName === 'gsc' && !tabLoaded.gsc) { fetchGSCData(); }
     if (tabName === 'youtube' && !tabLoaded.youtube) { fetchYouTubeData(); }
+    if (tabName === 'linkedin' && !tabLoaded.linkedin) { fetchLinkedInData(); }
+    if (tabName === 'social' && !tabLoaded.social) { fetchSocialData(); }
+    if (tabName === 'google-ads' && !tabLoaded['google-ads']) { fetchGoogleAdsData(); }
 }
 
 // ─── GA4 ────────────────────────────────────────────────────────────────────
@@ -194,6 +197,73 @@ function renderYTVideosList(videos) {
             <tbody>${rows}</tbody>
         </table>
     </div>`;
+}
+
+// ─── LinkedIn ───────────────────────────────────────────────────────────────
+
+async function fetchLinkedInData() {
+    try {
+        const data = await apiFetch('linkedin');
+        tabLoaded.linkedin = true;
+        updateKPIValue('li-followers', data.followerCount);
+        updateKPIValue('li-posts', data.postCount);
+        updateKPIValue('li-likes', data.totalLikes);
+        updateKPIValue('li-reposts', data.totalReposts);
+    } catch (error) {
+        console.error("Failed fetching LinkedIn data:", error);
+        showKPIError(['li-followers', 'li-posts', 'li-likes', 'li-reposts']);
+    }
+}
+
+// ─── Social Media (Meta + Twitter) ──────────────────────────────────────────
+
+async function fetchSocialData() {
+    tabLoaded.social = true;
+
+    // Facebook + Instagram
+    try {
+        const meta = await apiFetch('social/meta');
+        const fb = meta.facebook || {};
+        const ig = meta.instagram || {};
+        updateKPIValue('fb-posts', fb.postCount ?? 0);
+        updateKPIValue('fb-likes', fb.likes ?? 0);
+        updateKPIValue('fb-impressions', fb.impressions ?? 0);
+        updateKPIValue('fb-clicks', fb.clicks ?? 0);
+        updateKPIValue('ig-followers', ig.followerCount ?? 0);
+        updateKPIValue('ig-posts', ig.postCount ?? 0);
+        updateKPIValue('ig-likes', ig.likes ?? 0);
+        updateKPIValue('ig-impressions', ig.impressions ?? 0);
+    } catch (error) {
+        console.error("Failed fetching Meta data:", error);
+        showKPIError(['fb-posts', 'fb-likes', 'fb-impressions', 'fb-clicks', 'ig-followers', 'ig-posts', 'ig-likes', 'ig-impressions']);
+    }
+
+    // Twitter/X
+    try {
+        const tw = await apiFetch('social/twitter');
+        updateKPIValue('tw-posts', tw.postCount ?? 0);
+        updateKPIValue('tw-impressions', tw.impressions ?? 0);
+        updateKPIValue('tw-likes', tw.likes ?? 0);
+        updateKPIValue('tw-clicks', tw.clicks ?? 0);
+    } catch (error) {
+        console.error("Failed fetching Twitter data:", error);
+        showKPIError(['tw-posts', 'tw-impressions', 'tw-likes', 'tw-clicks']);
+    }
+}
+
+// ─── Google Ads ──────────────────────────────────────────────────────────────
+
+async function fetchGoogleAdsData() {
+    tabLoaded['google-ads'] = true;
+    try {
+        const data = await apiFetch('google-ads');
+        const el = document.getElementById('gads-status');
+        if (el) el.textContent = data.message || 'Pending approval';
+    } catch (error) {
+        console.error("Failed fetching Google Ads data:", error);
+        const el = document.getElementById('gads-status');
+        if (el) el.textContent = 'Unavailable';
+    }
 }
 
 // ─── Chart Renderers ────────────────────────────────────────────────────────
