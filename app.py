@@ -33,11 +33,25 @@ YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 LINKEDIN_ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
 LINKEDIN_ORGANIZATION_ID = os.getenv("LINKEDIN_ORGANIZATION_ID")
 
-# Meta
-FACEBOOK_ACCESS_TOKEN = os.getenv("FACEBOOK_ACCESS_TOKEN")
-INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
-INSTAGRAM_BUSINESS_ACCOUNT_ID = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+# Meta — per org
+FACEBOOK_ACCESS_TOKEN = {
+    "ravenlabs": os.getenv("FACEBOOK_ACCESS_TOKEN_RAVENLABS"),
+    "sdh":       os.getenv("FACEBOOK_ACCESS_TOKEN_SDH"),
+}
+FACEBOOK_PAGE_ID = {
+    "ravenlabs": os.getenv("FACEBOOK_PAGE_ID_RAVENLABS"),
+    "sdh":       os.getenv("FACEBOOK_PAGE_ID_SDH"),
+}
+INSTAGRAM_ACCESS_TOKEN = {
+    "ravenlabs": os.getenv("INSTAGRAM_ACCESS_TOKEN_RAVENLABS"),
+    "sdh":       os.getenv("INSTAGRAM_ACCESS_TOKEN_SDH"),
+    "linkstone": os.getenv("INSTAGRAM_ACCESS_TOKEN_LINKSTONE"),
+}
+INSTAGRAM_ACCOUNT_ID = {
+    "ravenlabs": os.getenv("INSTAGRAM_ACCOUNT_ID_RAVENLABS"),
+    "sdh":       os.getenv("INSTAGRAM_ACCOUNT_ID_SDH"),
+    "linkstone": os.getenv("INSTAGRAM_ACCOUNT_ID_LINKSTONE"),
+}
 
 # Twitter/X
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
@@ -465,102 +479,96 @@ class MetaService:
     GRAPH = "https://graph.facebook.com/v19.0"
 
     @staticmethod
-    def get_meta_report():
-        if not FACEBOOK_ACCESS_TOKEN or not FACEBOOK_PAGE_ID:
-            return {"error": "FACEBOOK_ACCESS_TOKEN and FACEBOOK_PAGE_ID not configured"}, 500
+    def get_meta_report(org: str = "ravenlabs"):
+        fb_token = FACEBOOK_ACCESS_TOKEN.get(org)
+        fb_page  = FACEBOOK_PAGE_ID.get(org)
+        ig_token = INSTAGRAM_ACCESS_TOKEN.get(org)
+        ig_acct  = INSTAGRAM_ACCOUNT_ID.get(org)
+
+        result = {
+            "facebook":  {"postCount": 0, "likes": 0, "impressions": 0, "clicks": 0},
+            "instagram": {"postCount": 0, "likes": 0, "impressions": 0, "clicks": 0, "followerCount": 0},
+        }
 
         try:
-            # Facebook Page insights
-            fb_insights_resp = requests.get(
-                f"{MetaService.GRAPH}/{FACEBOOK_PAGE_ID}/insights",
-                params={
-                    "metric": "page_post_engagements,page_impressions,page_fans",
-                    "period": "day",
-                    "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
-                    "until": datetime.now().strftime("%Y-%m-%d"),
-                    "access_token": FACEBOOK_ACCESS_TOKEN,
-                },
-                timeout=10,
-            )
-            fb_insights_resp.raise_for_status()
-            fb_insights = fb_insights_resp.json().get("data", [])
+            # ── Facebook ──
+            if fb_token and fb_page:
+                fb_insights_resp = requests.get(
+                    f"{MetaService.GRAPH}/{fb_page}/insights",
+                    params={
+                        "metric": "page_post_engagements,page_impressions,page_fans",
+                        "period": "day",
+                        "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                        "until": datetime.now().strftime("%Y-%m-%d"),
+                        "access_token": fb_token,
+                    },
+                    timeout=10,
+                )
+                if fb_insights_resp.ok:
+                    fb_likes = 0
+                    fb_impressions = 0
+                    for metric in fb_insights_resp.json().get("data", []):
+                        values = metric.get("values", [])
+                        total = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
+                        if metric["name"] == "page_post_engagements":
+                            fb_likes = total
+                        elif metric["name"] == "page_impressions":
+                            fb_impressions = total
 
-            fb_likes = 0
-            fb_impressions = 0
-            for metric in fb_insights:
-                values = metric.get("values", [])
-                total = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
-                if metric["name"] == "page_post_engagements":
-                    fb_likes = total
-                elif metric["name"] == "page_impressions":
-                    fb_impressions = total
+                    fb_posts_resp = requests.get(
+                        f"{MetaService.GRAPH}/{fb_page}/posts",
+                        params={"fields": "id", "limit": 100, "access_token": fb_token},
+                        timeout=10,
+                    )
+                    fb_post_count = len(fb_posts_resp.json().get("data", [])) if fb_posts_resp.ok else 0
+                    result["facebook"] = {
+                        "postCount": fb_post_count,
+                        "likes": int(fb_likes),
+                        "impressions": int(fb_impressions),
+                        "clicks": 0,
+                    }
 
-            # Facebook posts count
-            fb_posts_resp = requests.get(
-                f"{MetaService.GRAPH}/{FACEBOOK_PAGE_ID}/posts",
-                params={"fields": "id", "limit": 100, "access_token": FACEBOOK_ACCESS_TOKEN},
-                timeout=10,
-            )
-            fb_posts_resp.raise_for_status()
-            fb_post_count = len(fb_posts_resp.json().get("data", []))
-
-            result = {
-                "facebook": {
-                    "postCount": fb_post_count,
-                    "likes": int(fb_likes),
-                    "impressions": int(fb_impressions),
-                    "clicks": 0,
-                },
-                "instagram": {
-                    "postCount": 0,
-                    "likes": 0,
-                    "impressions": 0,
-                    "clicks": 0,
-                    "followerCount": 0,
-                },
-            }
-
-            # Instagram (if configured with its own token)
-            if INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID:
+            # ── Instagram ──
+            if ig_token and ig_acct:
                 ig_insights_resp = requests.get(
-                    f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/insights",
+                    f"{MetaService.GRAPH}/{ig_acct}/insights",
                     params={
                         "metric": "impressions,reach,profile_views",
                         "period": "day",
                         "since": (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
                         "until": datetime.now().strftime("%Y-%m-%d"),
-                        "access_token": INSTAGRAM_ACCESS_TOKEN,
+                        "access_token": ig_token,
                     },
                     timeout=10,
                 )
+                ig_impressions = 0
                 if ig_insights_resp.ok:
-                    ig_impressions = 0
                     for metric in ig_insights_resp.json().get("data", []):
                         if metric["name"] == "impressions":
                             ig_impressions = sum(v.get("value", 0) for v in metric.get("values", []))
 
-                    ig_media_resp = requests.get(
-                        f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}/media",
-                        params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": INSTAGRAM_ACCESS_TOKEN},
-                        timeout=10,
-                    )
-                    ig_media = ig_media_resp.json().get("data", []) if ig_media_resp.ok else []
-                    ig_likes = sum(m.get("like_count", 0) for m in ig_media)
+                ig_media_resp = requests.get(
+                    f"{MetaService.GRAPH}/{ig_acct}/media",
+                    params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": ig_token},
+                    timeout=10,
+                )
+                ig_media = ig_media_resp.json().get("data", []) if ig_media_resp.ok else []
+                ig_likes = sum(m.get("like_count", 0) for m in ig_media)
 
-                    ig_info_resp = requests.get(
-                        f"{MetaService.GRAPH}/{INSTAGRAM_BUSINESS_ACCOUNT_ID}",
-                        params={"fields": "followers_count", "access_token": INSTAGRAM_ACCESS_TOKEN},
-                        timeout=10,
-                    )
-                    ig_followers = ig_info_resp.json().get("followers_count", 0) if ig_info_resp.ok else 0
+                ig_info_resp = requests.get(
+                    f"{MetaService.GRAPH}/{ig_acct}",
+                    params={"fields": "followers_count", "access_token": ig_token},
+                    timeout=10,
+                )
+                ig_followers = ig_info_resp.json().get("followers_count", 0) if ig_info_resp.ok else 0
 
-                    result["instagram"] = {
-                        "postCount": len(ig_media),
-                        "likes": ig_likes,
-                        "impressions": int(ig_impressions),
-                        "clicks": 0,
-                        "followerCount": ig_followers,
-                    }
+                result["instagram"] = {
+                    "postCount": len(ig_media),
+                    "likes": ig_likes,
+                    "impressions": int(ig_impressions),
+                    "clicks": 0,
+                    "followerCount": ig_followers,
+                }
 
             return result, 200
 
@@ -719,7 +727,8 @@ def get_linkedin_data():
 
 @app.route("/api/social/meta", methods=["GET"])
 def get_meta_data():
-    data, status_code = MetaService.get_meta_report()
+    org = request.args.get("org", "ravenlabs")
+    data, status_code = MetaService.get_meta_report(org)
     return jsonify(data), status_code
 
 
