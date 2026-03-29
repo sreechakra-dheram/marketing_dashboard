@@ -555,6 +555,9 @@ class MetaService:
                 }
 
             # ── Instagram ──
+            # Instagram Graph API (Business) uses the Facebook Page Access Token,
+            # not a separate Instagram token. Fall back to fb_token if ig_token is absent.
+            ig_token = ig_token or fb_token
             if ig_token and ig_acct:
                 ig_insights_resp = requests.get(
                     f"{MetaService.GRAPH}/{ig_acct}/insights",
