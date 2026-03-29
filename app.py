@@ -26,12 +26,25 @@ load_dotenv()
 # Flask session secret
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-production")
 
-PROPERTY_ID = os.getenv("GA4_PROPERTY_ID")
+# GA4 — per org
+GA4_PROPERTY_ID = {
+    "ravenlabs": os.getenv("GA4_PROPERTY_ID_RAVENLABS"),
+    "sdh":       os.getenv("GA4_PROPERTY_ID_SDH"),
+    "linkstone": os.getenv("GA4_PROPERTY_ID_LINKSTONE"),
+}
+
+# GSC — per org
+GSC_SITE_URL = {
+    "ravenlabs": os.getenv("GSC_SITE_URL_RAVENLABS"),
+    "sdh":       os.getenv("GSC_SITE_URL_SDH"),
+    "linkstone": os.getenv("GSC_SITE_URL_LINKSTONE"),
+}
+
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 
 # LinkedIn
 LINKEDIN_ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
-LINKEDIN_ORGANIZATION_ID = os.getenv("LINKEDIN_ORGANIZATION_ID")
+LINKEDIN_ORGANIZATION_ID = os.getenv("LINKEDIN_ORG_ID_RAVENLABS")
 
 # Meta — per org
 FACEBOOK_ACCESS_TOKEN = {
@@ -57,9 +70,9 @@ INSTAGRAM_ACCOUNT_ID = {
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TWITTER_USER_ID = os.getenv("TWITTER_USER_ID")
 
-# OAuth 2.0 config (used for one-time YouTube auth)
-OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
-OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+# OAuth 2.0 config — Account B credentials (YouTube only)
+OAUTH_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
+OAUTH_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 
 # YouTube OAuth refresh token (stored after one-time admin auth)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN")
@@ -202,14 +215,15 @@ app.static_url_path = ""
 
 class AnalyticsService:
     @staticmethod
-    def get_ga4_report():
-        if not PROPERTY_ID:
-            return {"error": "GA4_PROPERTY_ID not configured in .env"}, 500
+    def get_ga4_report(org: str = "ravenlabs", days: int = 7):
+        property_id = GA4_PROPERTY_ID.get(org)
+        if not property_id:
+            return {"error": f"GA4_PROPERTY_ID not configured for org: {org}"}, 500
 
         try:
             client = BetaAnalyticsDataClient()
             req = RunReportRequest(
-                property=f"properties/{PROPERTY_ID}",
+                property=f"properties/{property_id}",
                 dimensions=[Dimension(name="date")],
                 metrics=[
                     Metric(name="sessions"),
@@ -217,7 +231,7 @@ class AnalyticsService:
                     Metric(name="screenPageViews"),
                     Metric(name="eventCount"),
                 ],
-                date_ranges=[DateRange(start_date="7daysAgo", end_date="today")],
+                date_ranges=[DateRange(start_date=f"{days}daysAgo", end_date="today")],
             )
 
             response = client.run_report(req)
@@ -246,7 +260,11 @@ class AnalyticsService:
 
 class SearchConsoleService:
     @staticmethod
-    def get_gsc_report(site_url="https://theravenlabs.com/"):
+    def get_gsc_report(org: str = "ravenlabs", days: int = 7):
+        site_url = GSC_SITE_URL.get(org)
+        if not site_url:
+            return {"error": f"GSC_SITE_URL not configured for org: {org}"}, 500
+
         try:
             credentials, _ = google.auth.default(
                 scopes=["https://www.googleapis.com/auth/webmasters.readonly"]
@@ -254,7 +272,7 @@ class SearchConsoleService:
             service = build("webmasters", "v3", credentials=credentials)
 
             end_date = datetime.now() - timedelta(days=2)
-            start_date = end_date - timedelta(days=6)
+            start_date = end_date - timedelta(days=days - 1)
 
             req_body = {
                 "startDate": start_date.strftime("%Y-%m-%d"),
@@ -632,20 +650,17 @@ class TwitterService:
 
 @app.route("/api/ga4", methods=["GET"])
 def get_ga4_data():
-    data, status_code = AnalyticsService.get_ga4_report()
+    org = request.args.get("org", "ravenlabs")
+    days = min(int(request.args.get("days", 7)), 90)
+    data, status_code = AnalyticsService.get_ga4_report(org, days)
     return jsonify(data), status_code
 
 
 @app.route("/api/gsc", methods=["GET"])
 def get_gsc_data():
-    data, status_code = SearchConsoleService.get_gsc_report("theravenlabs.com")
-
-    if status_code != 200:
-        data, status_code = SearchConsoleService.get_gsc_report("sc-domain:theravenlabs.com")
-
-    if status_code != 200:
-        data, status_code = SearchConsoleService.get_gsc_report("https://theravenlabs.com/")
-
+    org = request.args.get("org", "ravenlabs")
+    days = min(int(request.args.get("days", 7)), 90)
+    data, status_code = SearchConsoleService.get_gsc_report(org, days)
     return jsonify(data), status_code
 
 
