@@ -797,9 +797,18 @@ class GoogleAdsService:
 
             if not resp.ok:
                 print(f"Google Ads REST error {resp.status_code}: {resp.text}")
-                return {"error": f"Google Ads API error ({resp.status_code}): {resp.json().get('error', {}).get('message', resp.text)}"}, 200
+                try:
+                    msg = resp.json().get("error", {}).get("message", resp.text)
+                except Exception:
+                    msg = resp.text or f"HTTP {resp.status_code}"
+                return {"error": f"Google Ads API error ({resp.status_code}): {msg}"}, 200
 
-            rows = resp.json().get("results", [])
+            try:
+                body = resp.json()
+            except Exception:
+                return {"error": f"Google Ads returned non-JSON response: {resp.text[:300]}"}, 200
+
+            rows = body.get("results", [])
 
             data = {"dates": [], "clicks": [], "impressions": [], "cost": [], "conversions": []}
             for row in rows:
