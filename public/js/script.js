@@ -206,6 +206,19 @@ function handleOrgChange(newOrg) {
   // Invalidate all loaded state
   Object.keys(tabLoaded).forEach(k => delete tabLoaded[k]);
 
+  // Reset social sub-tab to Facebook so the new org loads fresh from the start
+  activeSocialPlatform = 'facebook';
+  document.querySelectorAll('.social-nav-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.platform === 'facebook'));
+  document.querySelectorAll('.social-platform-panel').forEach(p =>
+    p.classList.toggle('active', p.id === 'panel-facebook'));
+  // Reset KPI shimmers so stale numbers don't persist while loading
+  ['fb-page-followers','fb-impressions','fb-reach','fb-engagements','fb-page-views','fb-new-followers',
+   'ig-followers','ig-following','ig-media-count','ig-impressions','ig-reach','ig-profile-views']
+    .forEach(id => { const el = document.getElementById(id); if (el) { el.textContent = '--'; el.classList.add('loading-shimmer'); } });
+  const fbList = document.getElementById('fb-posts-list'); if (fbList) fbList.innerHTML = '';
+  const igList = document.getElementById('ig-media-list'); if (igList) igList.innerHTML = '';
+
   // Restore any panels that were replaced with "not available"
   ['tab-linkedin', 'tab-youtube', 'tab-social', 'tab-ga4', 'tab-gsc', 'tab-google-ads'].forEach(id => {
     if (panelOriginalHTML[id]) restorePanel(id);
@@ -427,61 +440,205 @@ async function fetchLinkedIn() {
   }
 }
 
-// ── Social (Meta) ──────────────────────────────────────────────
+// ── Social ─────────────────────────────────────────────────────
+let fbChartInstance  = null;
+let igChartInstance  = null;
+let activeSocialPlatform  = 'facebook';
+let socialNavReady    = false;   // attach listeners only once
+
+function initSocialNav() {
+  if (socialNavReady) return;
+  socialNavReady = true;
+  document.querySelectorAll('.social-nav-btn[data-platform]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const platform = btn.dataset.platform;
+      if (platform === activeSocialPlatform) return;
+      activeSocialPlatform = platform;
+      document.querySelectorAll('.social-nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.social-platform-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById(`panel-${platform}`)?.classList.add('active');
+      // Only fetch if not already cached for this org+days
+      if (platform === 'facebook') fetchFacebook();
+      else fetchInstagram();
+    });
+  });
+}
+
+// Called when the Social top-tab is opened
 async function fetchSocial() {
-  const cacheKey = `social-${currentOrg}-${currentDays}`;
+  initSocialNav();
+  // Only load the currently-active platform sub-tab
+  if (activeSocialPlatform === 'facebook') fetchFacebook();
+  else fetchInstagram();
+}
 
-  // Facebook: not available for Linkstone
-  const fbIds = ['fb-posts', 'fb-likes', 'fb-impressions', 'fb-clicks'];
-  const igIds = ['ig-followers', 'ig-posts', 'ig-likes', 'ig-impressions'];
+async function fetchFacebook() {
+  const cacheKey = `social-facebook-${currentOrg}-${currentDays}`;
+  if (tabLoaded[cacheKey]) return;   // already rendered for this org+days
 
-  resetKPIShimmer([...fbIds, ...igIds]);
+  if (currentOrg === 'linkstone') {
+    const panel = document.getElementById('panel-facebook');
+    if (panel) panel.innerHTML = `<div class="not-available" style="padding:3rem 1rem;text-align:center;"><p style="color:#94a3b8;font-size:0.85rem;">Facebook is not connected for Linkstone.</p></div>`;
+    tabLoaded[cacheKey] = true;
+    return;
+  }
+
+  const fbKPIs = ['fb-page-followers','fb-impressions','fb-reach','fb-engagements','fb-page-views','fb-new-followers'];
+  resetKPIShimmer(fbKPIs);
 
   try {
-    const meta = await apiFetch(`social/meta?org=${currentOrg}`);
-    tabLoaded[cacheKey] = true;
+    const data = await apiFetch(`social/facebook?org=${currentOrg}&days=${currentDays}`);
 
-    // Facebook
-    if (currentOrg === 'linkstone') {
-      const fbSection = document.getElementById('fb-section');
-      if (fbSection) {
-        if (!panelOriginalHTML['fb-section']) {
-          panelOriginalHTML['fb-section'] = fbSection.innerHTML;
-        }
-        fbSection.innerHTML = `
-          <div class="platform-header">
-            <svg class="platform-icon" width="18" height="18" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-            <span class="platform-name">Facebook</span>
-          </div>
-          <div class="not-available" style="padding:1.5rem 1rem;text-align:left;">
-            <p style="font-size:0.82rem;color:#94a3b8;">Facebook is not available for Linkstone.</p>
-          </div>`;
-      }
-    } else {
-      // Restore fb section if it was replaced
-      if (panelOriginalHTML['fb-section']) {
-        const fbSection = document.getElementById('fb-section');
-        if (fbSection) fbSection.innerHTML = panelOriginalHTML['fb-section'];
-        delete panelOriginalHTML['fb-section'];
-      }
-      const fb = meta.facebook || {};
-      updateKPI('fb-posts',       fb.postCount   ?? 0);
-      updateKPI('fb-likes',       fb.likes        ?? 0);
-      updateKPI('fb-impressions', fb.impressions  ?? 0);
-      updateKPI('fb-clicks',      fb.clicks       ?? 0);
+    if (data.error) {
+      showKPIError(fbKPIs);
+      console.warn('Facebook error:', data.error);
+      return;
     }
 
-    // Instagram — available for all orgs
-    const ig = meta.instagram || {};
-    updateKPI('ig-followers',   ig.followerCount ?? 0);
-    updateKPI('ig-posts',       ig.postCount     ?? 0);
-    updateKPI('ig-likes',       ig.likes          ?? 0);
-    updateKPI('ig-impressions', ig.impressions    ?? 0);
+    const page    = data.page    || {};
+    const summary = data.summary || {};
+    const daily   = data.daily   || {};
+
+    updateKPI('fb-page-followers', page.followers         ?? 0);
+    updateKPI('fb-impressions',    summary.impressions     ?? 0);
+    updateKPI('fb-reach',          summary.reach           ?? 0);
+    updateKPI('fb-engagements',    summary.engagements     ?? 0);
+    updateKPI('fb-page-views',     summary.page_views      ?? 0);
+    updateKPI('fb-new-followers',  summary.new_followers   ?? 0);
+
+    renderSocialChart('fbChart', fbChartInstance, daily, '#1877F2', '#e2efff',
+      ins => { fbChartInstance = ins; });
+    renderPostsList('fb-posts-list', data.posts || [], 'facebook');
+
+    tabLoaded[cacheKey] = true;
 
   } catch (err) {
-    console.error('Social/Meta fetch failed:', err);
-    showKPIError([...fbIds, ...igIds]);
+    console.error('Facebook fetch failed:', err);
+    showKPIError(fbKPIs);
   }
+}
+
+async function fetchInstagram() {
+  const cacheKey = `social-instagram-${currentOrg}-${currentDays}`;
+  if (tabLoaded[cacheKey]) return;   // already rendered for this org+days
+
+  const igKPIs = ['ig-followers','ig-following','ig-media-count','ig-impressions','ig-reach','ig-profile-views'];
+  resetKPIShimmer(igKPIs);
+
+  try {
+    const data = await apiFetch(`social/instagram?org=${currentOrg}&days=${currentDays}`);
+
+    if (data.error) {
+      showKPIError(igKPIs);
+      console.warn('Instagram error:', data.error);
+      return;
+    }
+
+    const account = data.account || {};
+    const summary = data.summary || {};
+    const daily   = data.daily   || {};
+
+    updateKPI('ig-followers',     account.followers    ?? 0);
+    updateKPI('ig-following',     account.following    ?? 0);
+    updateKPI('ig-media-count',   account.media_count  ?? 0);
+    updateKPI('ig-impressions',   summary.impressions  ?? 0);
+    updateKPI('ig-reach',         summary.reach        ?? 0);
+    updateKPI('ig-profile-views', summary.profile_views ?? 0);
+
+    renderSocialChart('igChart', igChartInstance, daily, '#e1306c', '#fce4ec',
+      ins => { igChartInstance = ins; });
+    renderPostsList('ig-media-list', data.media || [], 'instagram');
+
+    tabLoaded[cacheKey] = true;
+
+  } catch (err) {
+    console.error('Instagram fetch failed:', err);
+    showKPIError(igKPIs);
+  }
+}
+
+function renderSocialChart(canvasId, existingInstance, daily, color, fillColor, setInstance) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (existingInstance) existingInstance.destroy();
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 240);
+  grad.addColorStop(0, fillColor);
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  const labels = (daily.dates || []).map(d => {
+    if (d.length === 6) return d.slice(2,4) + '/' + d.slice(4,6);
+    return d;
+  });
+  setInstance(new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Impressions',
+          data: daily.impressions || [],
+          borderColor: color,
+          backgroundColor: grad,
+          borderWidth: 2,
+          pointRadius: 3,
+          tension: 0.35,
+          fill: true,
+        },
+        {
+          label: 'Reach',
+          data: daily.reach || [],
+          borderColor: '#94a3b8',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          pointRadius: 2,
+          tension: 0.35,
+          borderDash: [4, 3],
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+        y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+      },
+    },
+  }));
+}
+
+function renderPostsList(containerId, items, platform) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = '<p style="color:#94a3b8;font-size:0.82rem;padding:1rem 0;">No recent posts found.</p>';
+    return;
+  }
+  el.innerHTML = items.map(item => {
+    const date     = platform === 'instagram' ? (item.timestamp || '') : (item.created_time || '');
+    const text     = platform === 'instagram' ? (item.caption || '') : (item.message || '');
+    const likes    = platform === 'instagram' ? item.like_count : item.likes;
+    const comments = platform === 'instagram' ? item.comments_count : item.comments;
+    const extra    = platform === 'facebook'
+      ? `<span class="post-stat"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>${item.shares ?? 0} shares</span>`
+      : `<span class="post-stat">${item.media_type || ''}</span>`;
+    return `
+      <div class="post-row">
+        ${item.thumbnail ? `<img class="post-thumb" src="${item.thumbnail}" alt="" onerror="this.style.display='none'">` : '<div class="post-thumb post-thumb-empty"></div>'}
+        <div class="post-body">
+          <p class="post-text">${text || '<em style="color:#94a3b8">No caption</em>'}</p>
+          <div class="post-meta">
+            <span class="post-date">${date}</span>
+            <span class="post-stat"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>${likes ?? 0}</span>
+            <span class="post-stat"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${comments ?? 0}</span>
+            ${extra}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // ── Google Ads ───────────────────────────────────────────────────

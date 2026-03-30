@@ -596,112 +596,212 @@ class MetaService:
     GRAPH = "https://graph.facebook.com/v19.0"
 
     @staticmethod
-    def get_meta_report(org: str = "ravenlabs"):
+    def get_facebook_report(org: str = "ravenlabs", days: int = 7):
         fb_token = FACEBOOK_ACCESS_TOKEN.get(org)
         fb_page  = FACEBOOK_PAGE_ID.get(org)
-        ig_token = INSTAGRAM_ACCESS_TOKEN.get(org)
-        ig_acct  = INSTAGRAM_ACCOUNT_ID.get(org)
+        if not fb_token or not fb_page:
+            return {"error": f"Facebook not configured for {org}"}, 200
 
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        until = datetime.now().strftime("%Y-%m-%d")
         result = {
-            "facebook":  {"postCount": 0, "likes": 0, "impressions": 0, "clicks": 0},
-            "instagram": {"postCount": 0, "likes": 0, "impressions": 0, "clicks": 0, "followerCount": 0},
+            "page":    {"name": "", "followers": 0, "likes": 0, "category": ""},
+            "summary": {"impressions": 0, "reach": 0, "engagements": 0, "page_views": 0, "new_followers": 0},
+            "posts":   [],
+            "daily":   {"dates": [], "impressions": [], "reach": []},
         }
 
         try:
-            # ── Facebook ──
-            if fb_token and fb_page:
-                since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-                until = datetime.now().strftime("%Y-%m-%d")
-
-                # page_fans is a lifetime metric — must NOT be mixed with period=day
-                fb_insights_resp = requests.get(
-                    f"{MetaService.GRAPH}/{fb_page}/insights",
-                    params={
-                        "metric": "page_post_engagements,page_impressions",
-                        "period": "day",
-                        "since": since,
-                        "until": until,
-                        "access_token": fb_token,
-                    },
-                    timeout=10,
-                )
-                fb_likes = 0
-                fb_impressions = 0
-                if fb_insights_resp.ok:
-                    for metric in fb_insights_resp.json().get("data", []):
-                        values = metric.get("values", [])
-                        total = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
-                        if metric["name"] == "page_post_engagements":
-                            fb_likes = total
-                        elif metric["name"] == "page_impressions":
-                            fb_impressions = total
-                else:
-                    print(f"FB insights error {fb_insights_resp.status_code}: {fb_insights_resp.text[:300]}")
-
-                fb_posts_resp = requests.get(
-                    f"{MetaService.GRAPH}/{fb_page}/posts",
-                    params={"fields": "id", "limit": 100, "access_token": fb_token},
-                    timeout=10,
-                )
-                fb_post_count = len(fb_posts_resp.json().get("data", [])) if fb_posts_resp.ok else 0
-                result["facebook"] = {
-                    "postCount": fb_post_count,
-                    "likes": int(fb_likes),
-                    "impressions": int(fb_impressions),
-                    "clicks": 0,
+            # Page info
+            page_resp = requests.get(
+                f"{MetaService.GRAPH}/{fb_page}",
+                params={"fields": "name,followers_count,fan_count,category", "access_token": fb_token},
+                timeout=10,
+            )
+            if page_resp.ok:
+                pd = page_resp.json()
+                result["page"] = {
+                    "name": pd.get("name", ""),
+                    "followers": pd.get("followers_count", 0),
+                    "likes": pd.get("fan_count", 0),
+                    "category": pd.get("category", ""),
                 }
+            else:
+                print(f"FB page info error: {page_resp.text[:200]}")
 
-            # ── Instagram ──
-            # Instagram Graph API (Business) uses the Facebook Page Access Token,
-            # not a separate Instagram token. Fall back to fb_token if ig_token is absent.
-            ig_token = ig_token or fb_token
-            if ig_token and ig_acct:
-                ig_insights_resp = requests.get(
-                    f"{MetaService.GRAPH}/{ig_acct}/insights",
-                    params={
-                        "metric": "impressions,reach",
-                        "period": "week",
-                        "access_token": ig_token,
-                    },
-                    timeout=10,
-                )
-                ig_impressions = 0
-                if ig_insights_resp.ok:
-                    for metric in ig_insights_resp.json().get("data", []):
-                        if metric["name"] == "impressions":
-                            values = metric.get("values", [])
-                            ig_impressions = values[-1].get("value", 0) if values else 0
-                else:
-                    print(f"IG insights error {ig_insights_resp.status_code}: {ig_insights_resp.text[:300]}")
-
-                ig_media_resp = requests.get(
-                    f"{MetaService.GRAPH}/{ig_acct}/media",
-                    params={"fields": "id,like_count,comments_count", "limit": 50, "access_token": ig_token},
-                    timeout=10,
-                )
-                ig_media = ig_media_resp.json().get("data", []) if ig_media_resp.ok else []
-                ig_likes = sum(m.get("like_count", 0) for m in ig_media)
-
-                ig_info_resp = requests.get(
-                    f"{MetaService.GRAPH}/{ig_acct}",
-                    params={"fields": "followers_count", "access_token": ig_token},
-                    timeout=10,
-                )
-                ig_followers = ig_info_resp.json().get("followers_count", 0) if ig_info_resp.ok else 0
-
-                result["instagram"] = {
-                    "postCount": len(ig_media),
-                    "likes": ig_likes,
-                    "impressions": int(ig_impressions),
-                    "clicks": 0,
-                    "followerCount": ig_followers,
+            # Page insights — daily breakdown
+            insights_resp = requests.get(
+                f"{MetaService.GRAPH}/{fb_page}/insights",
+                params={
+                    "metric": "page_impressions,page_reach,page_post_engagements,page_views_total,page_fan_adds",
+                    "period": "day",
+                    "since": since,
+                    "until": until,
+                    "access_token": fb_token,
+                },
+                timeout=10,
+            )
+            if insights_resp.ok:
+                daily_imp, daily_reach = {}, {}
+                for metric in insights_resp.json().get("data", []):
+                    name   = metric["name"]
+                    values = metric.get("values", [])
+                    total  = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
+                    if name == "page_impressions":
+                        result["summary"]["impressions"] = int(total)
+                        for v in values:
+                            daily_imp[v.get("end_time", "")[:10]] = v.get("value", 0)
+                    elif name == "page_reach":
+                        result["summary"]["reach"] = int(total)
+                        for v in values:
+                            daily_reach[v.get("end_time", "")[:10]] = v.get("value", 0)
+                    elif name == "page_post_engagements":
+                        result["summary"]["engagements"] = int(total)
+                    elif name == "page_views_total":
+                        result["summary"]["page_views"] = int(total)
+                    elif name == "page_fan_adds":
+                        result["summary"]["new_followers"] = int(total)
+                dates = sorted(daily_imp.keys())
+                result["daily"] = {
+                    "dates":       [d.replace("-", "")[2:] for d in dates],
+                    "impressions": [daily_imp.get(d, 0) for d in dates],
+                    "reach":       [daily_reach.get(d, 0) for d in dates],
                 }
+            else:
+                print(f"FB insights error {insights_resp.status_code}: {insights_resp.text[:300]}")
 
-            return result, 200
+            # Recent posts with engagement counts
+            posts_resp = requests.get(
+                f"{MetaService.GRAPH}/{fb_page}/posts",
+                params={
+                    "fields": "id,message,created_time,full_picture,likes.summary(true),comments.summary(true),shares",
+                    "limit": 8,
+                    "access_token": fb_token,
+                },
+                timeout=10,
+            )
+            if posts_resp.ok:
+                for p in posts_resp.json().get("data", []):
+                    result["posts"].append({
+                        "message":      (p.get("message", "") or "")[:120],
+                        "created_time": p.get("created_time", "")[:10],
+                        "likes":        p.get("likes", {}).get("summary", {}).get("total_count", 0),
+                        "comments":     p.get("comments", {}).get("summary", {}).get("total_count", 0),
+                        "shares":       p.get("shares", {}).get("count", 0),
+                        "thumbnail":    p.get("full_picture", ""),
+                    })
+            else:
+                print(f"FB posts error: {posts_resp.text[:200]}")
 
         except Exception as e:
-            print(f"Error fetching Meta data: {e}")
-            return {"error": str(e)}, 500
+            print(f"Facebook report error: {e}")
+            result["error"] = str(e)
+
+        return result, 200
+
+    @staticmethod
+    def get_instagram_report(org: str = "ravenlabs", days: int = 7):
+        ig_token = INSTAGRAM_ACCESS_TOKEN.get(org)
+        ig_acct  = INSTAGRAM_ACCOUNT_ID.get(org)
+        fb_token = FACEBOOK_ACCESS_TOKEN.get(org)
+        ig_token = ig_token or fb_token  # fall back to FB page token
+
+        if not ig_token or not ig_acct:
+            return {"error": f"Instagram not configured for {org}"}, 200
+
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        until = datetime.now().strftime("%Y-%m-%d")
+        result = {
+            "account": {"name": "", "username": "", "followers": 0, "following": 0, "media_count": 0},
+            "summary": {"impressions": 0, "reach": 0, "profile_views": 0},
+            "media":   [],
+            "daily":   {"dates": [], "impressions": [], "reach": []},
+        }
+
+        try:
+            # Account info
+            acct_resp = requests.get(
+                f"{MetaService.GRAPH}/{ig_acct}",
+                params={"fields": "name,username,followers_count,follows_count,media_count", "access_token": ig_token},
+                timeout=10,
+            )
+            if acct_resp.ok:
+                ad = acct_resp.json()
+                result["account"] = {
+                    "name":        ad.get("name", ""),
+                    "username":    ad.get("username", ""),
+                    "followers":   ad.get("followers_count", 0),
+                    "following":   ad.get("follows_count", 0),
+                    "media_count": ad.get("media_count", 0),
+                }
+            else:
+                print(f"IG account error {acct_resp.status_code}: {acct_resp.text[:300]}")
+
+            # Account insights — daily breakdown
+            insights_resp = requests.get(
+                f"{MetaService.GRAPH}/{ig_acct}/insights",
+                params={
+                    "metric": "impressions,reach,profile_views",
+                    "period": "day",
+                    "since":  since,
+                    "until":  until,
+                    "access_token": ig_token,
+                },
+                timeout=10,
+            )
+            if insights_resp.ok:
+                daily_imp, daily_reach = {}, {}
+                for metric in insights_resp.json().get("data", []):
+                    name   = metric["name"]
+                    values = metric.get("values", [])
+                    total  = sum(v.get("value", 0) for v in values if isinstance(v.get("value"), (int, float)))
+                    if name == "impressions":
+                        result["summary"]["impressions"] = int(total)
+                        for v in values:
+                            daily_imp[v.get("end_time", "")[:10]] = v.get("value", 0)
+                    elif name == "reach":
+                        result["summary"]["reach"] = int(total)
+                        for v in values:
+                            daily_reach[v.get("end_time", "")[:10]] = v.get("value", 0)
+                    elif name == "profile_views":
+                        result["summary"]["profile_views"] = int(total)
+                dates = sorted(daily_imp.keys())
+                result["daily"] = {
+                    "dates":       [d.replace("-", "")[2:] for d in dates],
+                    "impressions": [daily_imp.get(d, 0) for d in dates],
+                    "reach":       [daily_reach.get(d, 0) for d in dates],
+                }
+            else:
+                print(f"IG insights error {insights_resp.status_code}: {insights_resp.text[:300]}")
+
+            # Recent media
+            media_resp = requests.get(
+                f"{MetaService.GRAPH}/{ig_acct}/media",
+                params={
+                    "fields": "id,caption,media_type,thumbnail_url,media_url,timestamp,like_count,comments_count",
+                    "limit":  12,
+                    "access_token": ig_token,
+                },
+                timeout=10,
+            )
+            if media_resp.ok:
+                for m in media_resp.json().get("data", []):
+                    result["media"].append({
+                        "caption":        (m.get("caption", "") or "")[:100],
+                        "media_type":     m.get("media_type", ""),
+                        "timestamp":      m.get("timestamp", "")[:10],
+                        "like_count":     m.get("like_count", 0),
+                        "comments_count": m.get("comments_count", 0),
+                        "thumbnail":      m.get("thumbnail_url", "") or m.get("media_url", ""),
+                    })
+            else:
+                print(f"IG media error: {media_resp.text[:200]}")
+
+        except Exception as e:
+            print(f"Instagram report error: {e}")
+            result["error"] = str(e)
+
+        return result, 200
 
 
 # ─── Twitter/X Service ────────────────────────────────────────────────────────
@@ -919,10 +1019,19 @@ def get_linkedin_data():
     return jsonify(data), status_code
 
 
-@app.route("/api/social/meta", methods=["GET"])
-def get_meta_data():
-    org = request.args.get("org", "ravenlabs")
-    data, status_code = MetaService.get_meta_report(org)
+@app.route("/api/social/facebook", methods=["GET"])
+def get_facebook_data():
+    org  = request.args.get("org", "ravenlabs")
+    days = min(int(request.args.get("days", 7)), 90)
+    data, status_code = MetaService.get_facebook_report(org, days)
+    return jsonify(data), status_code
+
+
+@app.route("/api/social/instagram", methods=["GET"])
+def get_instagram_data():
+    org  = request.args.get("org", "ravenlabs")
+    days = min(int(request.args.get("days", 7)), 90)
+    data, status_code = MetaService.get_instagram_report(org, days)
     return jsonify(data), status_code
 
 
