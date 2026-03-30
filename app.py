@@ -787,7 +787,7 @@ class GoogleAdsService:
                 "ORDER BY segments.date ASC"
             )
 
-            url = f"https://googleads.googleapis.com/v19/customers/{customer_id}/googleAds:search"
+            url = f"https://googleads.googleapis.com/v20/customers/{customer_id}/googleAds:search"
             headers = {
                 "Authorization": f"Bearer {creds.token}",
                 "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
