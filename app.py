@@ -18,7 +18,7 @@ import google.auth
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from datetime import datetime, timedelta
-from google.ads.googleads.client import GoogleAdsClient
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -762,58 +762,52 @@ class GoogleAdsService:
     def get_google_ads_report(days: int = 7):
         if not GOOGLE_ADS_REFRESH_TOKEN or not GOOGLE_ADS_DEVELOPER_TOKEN or not GOOGLE_ADS_CUSTOMER_ID:
             return {"error": "Google Ads credentials not completely configured (missing token, dev token, or customer ID)."}, 200
-        
-        # Clean customer ID (e.g., from '341-872-6282' to '3418726282')
+
         customer_id = GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
 
-        credentials_dict = {
-            "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
-            "client_id": GOOGLE_ADS_CLIENT_ID,
-            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
-            "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
-            "use_proto_plus": True
-        }
-
         try:
-            client = GoogleAdsClient.load_from_dict(credentials_dict)
-            ga_service = client.get_service("GoogleAdsService", transport="rest")
+            # Refresh the access token using google-auth (no gRPC needed)
+            creds = Credentials(
+                token=None,
+                refresh_token=GOOGLE_ADS_REFRESH_TOKEN,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=GOOGLE_ADS_CLIENT_ID,
+                client_secret=GOOGLE_ADS_CLIENT_SECRET,
+            )
+            creds.refresh(GoogleAuthRequest())
 
             end_date = datetime.now().strftime("%Y-%m-%d")
-            # We fetch n days ago
-            start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
 
-            query = f"""
-                SELECT
-                    segments.date,
-                    metrics.clicks,
-                    metrics.impressions,
-                    metrics.cost_micros,
-                    metrics.conversions
-                FROM customer
-                WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
-                ORDER BY segments.date ASC
-            """
+            query = (
+                "SELECT segments.date, metrics.clicks, metrics.impressions, "
+                "metrics.cost_micros, metrics.conversions "
+                "FROM customer "
+                f"WHERE segments.date BETWEEN '{start_date}' AND '{end_date}' "
+                "ORDER BY segments.date ASC"
+            )
 
-            request = client.get_type("SearchGoogleAdsRequest")
-            request.customer_id = customer_id
-            request.query = query
-
-            response = ga_service.search(request=request)
-
-            data = {
-                "dates": [],
-                "clicks": [],
-                "impressions": [],
-                "cost": [],
-                "conversions": []
+            url = f"https://googleads.googleapis.com/v17/customers/{customer_id}/googleAds:search"
+            headers = {
+                "Authorization": f"Bearer {creds.token}",
+                "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
+                "Content-Type": "application/json",
             }
+            resp = requests.post(url, headers=headers, json={"query": query})
 
-            for row in response:
-                data["dates"].append(row.segments.date.replace("-", ""))
-                data["clicks"].append(row.metrics.clicks)
-                data["impressions"].append(row.metrics.impressions)
-                data["cost"].append(row.metrics.cost_micros / 1000000.0) # convert from micros
-                data["conversions"].append(row.metrics.conversions)
+            if not resp.ok:
+                print(f"Google Ads REST error {resp.status_code}: {resp.text}")
+                return {"error": f"Google Ads API error ({resp.status_code}): {resp.json().get('error', {}).get('message', resp.text)}"}, 200
+
+            rows = resp.json().get("results", [])
+
+            data = {"dates": [], "clicks": [], "impressions": [], "cost": [], "conversions": []}
+            for row in rows:
+                data["dates"].append(row["segments"]["date"].replace("-", ""))
+                data["clicks"].append(int(row["metrics"].get("clicks", 0)))
+                data["impressions"].append(int(row["metrics"].get("impressions", 0)))
+                data["cost"].append(float(row["metrics"].get("costMicros", 0)) / 1_000_000)
+                data["conversions"].append(float(row["metrics"].get("conversions", 0)))
 
             return data, 200
 
