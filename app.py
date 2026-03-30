@@ -776,7 +776,7 @@ class GoogleAdsService:
 
         try:
             client = GoogleAdsClient.load_from_dict(credentials_dict)
-            ga_service = client.get_service("GoogleAdsService")
+            ga_service = client.get_service("GoogleAdsService", transport="rest")
 
             end_date = datetime.now().strftime("%Y-%m-%d")
             # We fetch n days ago
