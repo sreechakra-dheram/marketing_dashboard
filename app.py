@@ -819,7 +819,7 @@ class GoogleAdsService:
 
         except Exception as e:
             print(f"Error fetching Google Ads data: {e}")
-            return {"error": str(e)}, 500
+            return {"error": str(e)}, 200
 
 
 # ─── API Endpoints ───────────────────────────────────────────────────────────

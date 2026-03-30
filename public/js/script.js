@@ -497,19 +497,20 @@ async function fetchGoogleAds() {
 
   try {
     const data = await apiFetch(`google-ads?org=${currentOrg}&days=${currentDays}`);
-    if (data.error && data.error.includes('credentials not completely configured')) {
-        const panel = document.getElementById('tab-google-ads');
-        if (!panelOriginalHTML['tab-google-ads']) {
-          panelOriginalHTML['tab-google-ads'] = panel.innerHTML;
-        }
-        panel.innerHTML = `
-          <div class="yt-auth-panel" style="margin-top:2rem;">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#EA4335" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
-            <h3>Google Ads Not Connected</h3>
-            <p>You need to authorise access once to fetch live data.</p>
-            <a href="/admin/auth/google-ads" class="yt-auth-btn" style="background:#202124;">Authorise Google Ads</a>
-          </div>`;
-        return;
+    if (data.error) {
+      const panel = document.getElementById('tab-google-ads');
+      if (!panelOriginalHTML['tab-google-ads']) {
+        panelOriginalHTML['tab-google-ads'] = panel.innerHTML;
+      }
+      const isAuthError = data.error.includes('credentials not completely configured');
+      panel.innerHTML = `
+        <div class="yt-auth-panel" style="margin-top:2rem;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#EA4335" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+          <h3>${isAuthError ? 'Google Ads Not Connected' : 'Google Ads Error'}</h3>
+          <p style="max-width:480px;color:#64748b;font-size:0.85rem;">${isAuthError ? 'You need to authorise access once to fetch live data.' : data.error}</p>
+          ${isAuthError ? '<a href="/admin/auth/google-ads" class="yt-auth-btn" style="background:#202124;">Authorise Google Ads</a>' : ''}
+        </div>`;
+      return;
     }
 
     tabLoaded[cacheKey] = true;
