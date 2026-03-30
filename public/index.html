@@ -20,15 +20,13 @@
     </div>
     <div class="header-center">
       <div class="org-switcher-wrap">
-        <label class="org-label">Org</label>
-        <select id="org-switcher" class="org-switcher">
-          <option value="ravenlabs">Raven Labs</option>
-          <option value="sdh">SDH</option>
-          <option value="linkstone">Linkstone</option>
-        </select>
+        <button class="org-btn active" data-org="ravenlabs">Raven Labs</button>
+        <button class="org-btn" data-org="sdh">SDH</button>
+        <button class="org-btn" data-org="linkstone">Linkstone</button>
       </div>
     </div>
     <div class="header-right">
+      <span class="sync-badge" id="last-synced" style="margin-right: 15px; color: #64748b; font-size: 0.85rem;"></span>
       <span class="date-badge" id="header-date"></span>
     </div>
   </header>
@@ -40,8 +38,8 @@
     <button class="tab-btn" data-tab="youtube">YouTube</button>
     <button class="tab-btn" data-tab="linkedin">LinkedIn</button>
     <button class="tab-btn" data-tab="social">Social</button>
+    <button class="tab-btn" data-tab="google-ads">Google Ads</button>
     <button class="tab-btn" data-tab="twitter">Twitter/X <span class="soon-badge">Soon</span></button>
-    <button class="tab-btn" data-tab="google-ads">Google Ads <span class="soon-badge">Soon</span></button>
   </nav>
 
   <!-- ═══ CONTENT AREA ═══ -->
@@ -338,16 +336,49 @@
       </div>
     </div>
 
-    <!-- ── GOOGLE ADS (Coming Soon) ── -->
+    <!-- ── GOOGLE ADS ── -->
     <div class="tab-panel" id="tab-google-ads">
-      <div class="coming-soon-wrapper">
-        <div class="coming-soon-card">
-          <div class="coming-soon-icon" style="background: linear-gradient(135deg,#4285F4,#34A853,#FBBC05,#EA4335); background-size: 200% 200%;">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+      <div class="tab-toolbar">
+        <div class="toolbar-left">
+          <h2 class="tab-heading">Google Ads</h2>
+        </div>
+        <div class="toolbar-right">
+          <div class="date-filters">
+            <button class="date-btn active" data-days="7">7D</button>
+            <button class="date-btn" data-days="14">14D</button>
+            <button class="date-btn" data-days="28">28D</button>
           </div>
-          <h2 class="coming-soon-title">Google Ads</h2>
-          <p class="coming-soon-desc">Google Ads integration is pending access approval. Campaign performance, spend, and conversion data will appear here once connected.</p>
-          <span class="coming-soon-tag" id="gads-status">Pending approval</span>
+          <button class="refresh-btn" data-refresh="google-ads" title="Refresh">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-label">Clicks</span>
+          <div class="kpi-number loading-shimmer" id="gads-clicks">--</div>
+          <span class="kpi-context">Period total</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Impressions</span>
+          <div class="kpi-number loading-shimmer" id="gads-impressions">--</div>
+          <span class="kpi-context">Period total</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Cost</span>
+          <div class="kpi-number loading-shimmer" id="gads-cost">--</div>
+          <span class="kpi-context">Period total</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Conversions</span>
+          <div class="kpi-number loading-shimmer" id="gads-conversions">--</div>
+          <span class="kpi-context">Period total</span>
+        </div>
+      </div>
+      <div class="charts-grid charts-grid-full">
+        <div class="chart-card">
+          <div class="chart-title">Clicks &amp; Conversions</div>
+          <div class="canvas-wrapper"><canvas id="gadsChart"></canvas></div>
         </div>
       </div>
     </div>

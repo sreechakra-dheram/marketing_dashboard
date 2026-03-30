@@ -4,3 +4,4 @@ venv/
 __pycache__/
 .vscode/
 .dockerignore
+env.yaml

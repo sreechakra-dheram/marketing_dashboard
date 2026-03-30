@@ -26,37 +26,45 @@ body {
 
 /* ── App Header ───────────────────────────────────────── */
 .app-header {
-  height: 60px;
-  background: #0f172a;
+  height: 64px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem 0 1.25rem;
+  padding: 0 2rem 0 1.5rem;
   flex-shrink: 0;
   position: relative;
   z-index: 100;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 4px 16px rgba(0,0,0,0.25);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1rem;
   min-width: 0;
 }
 
 .header-logo {
-  height: 28px;
+  height: 30px;
   width: auto;
   object-fit: contain;
   filter: brightness(0) invert(1);
-  opacity: 0.92;
+  opacity: 0.95;
+  flex-shrink: 0;
+}
+
+.header-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.12);
   flex-shrink: 0;
 }
 
 .header-title {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  color: #fff;
+  color: rgba(255,255,255,0.9);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -67,58 +75,56 @@ body {
   justify-content: center;
 }
 
+/* Org switcher — segmented pill style */
 .org-switcher-wrap {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 24px;
-  padding: 4px 6px 4px 12px;
+  gap: 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 3px;
 }
 
-.org-label {
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: rgba(255,255,255,0.45);
-  white-space: nowrap;
-}
-
-.org-switcher {
+.org-btn {
   background: transparent;
   border: none;
-  color: #fff;
+  color: rgba(255,255,255,0.5);
   font-family: 'Inter', sans-serif;
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
-  outline: none;
-  padding: 2px 22px 2px 4px;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 4px center;
+  padding: 5px 14px;
+  border-radius: 7px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
-.org-switcher option {
-  background: #1e293b;
+.org-btn:hover {
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.07);
+}
+
+.org-btn.active {
+  background: #2563eb;
   color: #fff;
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(37,99,235,0.5);
 }
 
 .header-right {
   display: flex;
   align-items: center;
+  gap: 0.75rem;
 }
 
 .date-badge {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 500;
-  color: rgba(255,255,255,0.5);
+  color: rgba(255,255,255,0.35);
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 /* ── Tab Bar ──────────────────────────────────────────── */

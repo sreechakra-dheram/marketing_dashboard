@@ -18,6 +18,7 @@ import google.auth
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from datetime import datetime, timedelta
+from google.ads.googleads.client import GoogleAdsClient
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -90,6 +91,13 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 # Path to .env file for writing the refresh token
 ENV_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
+# ── Google Ads config ──
+GOOGLE_ADS_DEVELOPER_TOKEN = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+GOOGLE_ADS_CUSTOMER_ID = os.getenv("GOOGLE_ADS_CUSTOMER_ID")
+GOOGLE_ADS_CLIENT_ID = os.getenv("GOOGLE_ADS_CLIENT_ID", OAUTH_CLIENT_ID) # Default to YT OAuth app if missing
+GOOGLE_ADS_CLIENT_SECRET = os.getenv("GOOGLE_ADS_CLIENT_SECRET", OAUTH_CLIENT_SECRET)
+GOOGLE_ADS_REFRESH_TOKEN = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
+GOOGLE_ADS_SCOPES = ["https://www.googleapis.com/auth/adwords"]
 
 def get_youtube_credentials():
     """Build YouTube OAuth credentials from stored refresh token."""
@@ -191,6 +199,95 @@ def _save_refresh_token_to_env(token):
         f.writelines(new_lines)
 
     print(f"YouTube refresh token saved to {ENV_FILE_PATH}")
+
+
+# ─── Admin: One-time Google Ads OAuth ────────────────────────────────────────
+
+@app.route("/admin/auth/google-ads")
+def admin_google_ads_auth():
+    """One-time route: user visits this to grant Google Ads access."""
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_ADS_CLIENT_ID,
+            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [url_for("admin_google_ads_callback", _external=True)],
+        }
+    }
+    flow = Flow.from_client_config(client_config, scopes=GOOGLE_ADS_SCOPES)
+    flow.redirect_uri = url_for("admin_google_ads_callback", _external=True)
+
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+    session["gads_oauth_state"] = state
+    return redirect(authorization_url)
+
+
+@app.route("/admin/auth/google-ads/callback")
+def admin_google_ads_callback():
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_ADS_CLIENT_ID,
+            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [url_for("admin_google_ads_callback", _external=True)],
+        }
+    }
+    flow = Flow.from_client_config(client_config, scopes=GOOGLE_ADS_SCOPES)
+    flow.redirect_uri = url_for("admin_google_ads_callback", _external=True)
+
+    if 'error' in request.args:
+        return f"<h3>Authentication Error</h3><p>Google returned an error: {request.args.get('error')}</p><a href='/'>Go back to Dashboard</a>", 400
+    
+    if 'code' not in request.args:
+        return f"<h3>Missing Authorization Code</h3><p>The authentication flow was interrupted or did not complete properly.</p><p>Please <a href='/admin/auth/google-ads'>click here to try authorizing again</a>.</p>", 400
+
+    flow.fetch_token(authorization_response=request.url)
+
+    credentials = flow.credentials
+    refresh_token = credentials.refresh_token
+
+    if not refresh_token:
+        return "<h3>Error: No refresh token received.</h3><p>Try revoking app access and try again.</p>", 400
+
+    _save_gads_refresh_token_to_env(refresh_token)
+
+    global GOOGLE_ADS_REFRESH_TOKEN
+    GOOGLE_ADS_REFRESH_TOKEN = refresh_token
+
+    return (
+        "<h3 style='font-family:Inter,sans-serif;color:#0f172a;'>Google Ads authorized successfully!</h3>"
+        "<p style='font-family:Inter,sans-serif;color:#475569;'>Refresh token saved to .env. "
+        "Google Ads data will now load on the dashboard.</p>"
+        "<p style='font-family:Inter,sans-serif;'><a href='/'>Go to Dashboard</a></p>"
+    )
+
+
+def _save_gads_refresh_token_to_env(token):
+    lines = []
+    found = False
+
+    if os.path.exists(ENV_FILE_PATH):
+        with open(ENV_FILE_PATH, "r") as f:
+            lines = f.readlines()
+
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith("GOOGLE_ADS_REFRESH_TOKEN="):
+            new_lines.append(f"GOOGLE_ADS_REFRESH_TOKEN={token}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        new_lines.append(f"\n# Google Ads OAuth refresh token (auto-saved)\nGOOGLE_ADS_REFRESH_TOKEN={token}\n")
+
+    with open(ENV_FILE_PATH, "w") as f:
+        f.writelines(new_lines)
 
 
 # ─── Dashboard (public) ─────────────────────────────────────────────────────
@@ -658,6 +755,73 @@ class TwitterService:
             return {"error": str(e)}, 500
 
 
+# ─── Google Ads Service ──────────────────────────────────────────────────────
+
+class GoogleAdsService:
+    @staticmethod
+    def get_google_ads_report(days: int = 7):
+        if not GOOGLE_ADS_REFRESH_TOKEN or not GOOGLE_ADS_DEVELOPER_TOKEN or not GOOGLE_ADS_CUSTOMER_ID:
+            return {"error": "Google Ads credentials not completely configured (missing token, dev token, or customer ID)."}, 200
+        
+        # Clean customer ID (e.g., from '341-872-6282' to '3418726282')
+        customer_id = GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
+
+        credentials_dict = {
+            "developer_token": GOOGLE_ADS_DEVELOPER_TOKEN,
+            "client_id": GOOGLE_ADS_CLIENT_ID,
+            "client_secret": GOOGLE_ADS_CLIENT_SECRET,
+            "refresh_token": GOOGLE_ADS_REFRESH_TOKEN,
+            "use_proto_plus": True
+        }
+
+        try:
+            client = GoogleAdsClient.load_from_dict(credentials_dict)
+            ga_service = client.get_service("GoogleAdsService")
+
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            # We fetch n days ago
+            start_date = (datetime.now() - timedelta(days=days-1)).strftime("%Y-%m-%d")
+
+            query = f"""
+                SELECT
+                    segments.date,
+                    metrics.clicks,
+                    metrics.impressions,
+                    metrics.cost_micros,
+                    metrics.conversions
+                FROM customer
+                WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'
+                ORDER BY segments.date ASC
+            """
+
+            request = client.get_type("SearchGoogleAdsRequest")
+            request.customer_id = customer_id
+            request.query = query
+
+            response = ga_service.search(request=request)
+
+            data = {
+                "dates": [],
+                "clicks": [],
+                "impressions": [],
+                "cost": [],
+                "conversions": []
+            }
+
+            for row in response:
+                data["dates"].append(row.segments.date.replace("-", ""))
+                data["clicks"].append(row.metrics.clicks)
+                data["impressions"].append(row.metrics.impressions)
+                data["cost"].append(row.metrics.cost_micros / 1000000.0) # convert from micros
+                data["conversions"].append(row.metrics.conversions)
+
+            return data, 200
+
+        except Exception as e:
+            print(f"Error fetching Google Ads data: {e}")
+            return {"error": str(e)}, 500
+
+
 # ─── API Endpoints ───────────────────────────────────────────────────────────
 
 @app.route("/api/ga4", methods=["GET"])
@@ -767,10 +931,13 @@ def get_twitter_data():
 
 @app.route("/api/google-ads", methods=["GET"])
 def get_google_ads_data():
-    return jsonify({
-        "status": "pending",
-        "message": "Google Ads integration pending developer account approval",
-    }), 200
+    org = request.args.get("org", "ravenlabs")
+    if org != "ravenlabs":
+        return jsonify({"message": "Google Ads not configured for this org"}), 200
+        
+    days = min(int(request.args.get("days", 7)), 90)
+    data, status_code = GoogleAdsService.get_google_ads_report(days)
+    return jsonify(data), status_code
 
 
 if __name__ == "__main__":
@@ -778,4 +945,6 @@ if __name__ == "__main__":
     print("Starting Raven Labs Analytics API...")
     if not YOUTUBE_REFRESH_TOKEN:
         print("⚠ YouTube not authorized. Visit http://localhost:{}/admin/auth/youtube to authorize.".format(port))
+    if not GOOGLE_ADS_REFRESH_TOKEN:
+        print("⚠ Google Ads not authorized. Visit http://localhost:{}/admin/auth/google-ads to authorize.".format(port))
     app.run(host="0.0.0.0", port=port, debug=os.getenv("FLASK_DEBUG", "true").lower() == "true")

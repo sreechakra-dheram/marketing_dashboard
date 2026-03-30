@@ -26,16 +26,17 @@ let ga4EngagementChartInstance = null;
 let gscChartInstance = null;
 let ytViewsChartInstance = null;
 let ytSubsChartInstance = null;
+let gadsChartInstance = null;
 
 // ── Org Config ─────────────────────────────────────────────────
 const ORG_CONFIG = {
-  ravenlabs: { name: 'Raven Labs', supportedTabs: ['ga4', 'gsc', 'youtube', 'linkedin', 'social'] },
+  ravenlabs: { name: 'Raven Labs', supportedTabs: ['ga4', 'gsc', 'youtube', 'linkedin', 'social', 'twitter', 'google-ads'] },
   sdh:       { name: 'SDH',        supportedTabs: ['ga4', 'gsc', 'social'] },
   linkstone: { name: 'Linkstone',  supportedTabs: ['ga4', 'gsc', 'social'] },
 };
 
-// Always-visible tabs regardless of org
-const ALWAYS_VISIBLE_TABS = ['twitter', 'google-ads'];
+// No tabs are always-visible — each org controls its own tab set
+const ALWAYS_VISIBLE_TABS = [];
 
 function updateTabBar(org) {
   const supported = ORG_CONFIG[org]?.supportedTabs || [];
@@ -57,6 +58,10 @@ const API = window.location.origin + '/api';
 async function apiFetch(path) {
   const response = await fetch(`${API}/${path}`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  
+  const el = document.getElementById('last-synced');
+  if (el) el.textContent = `Last synced: ${new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}`;
+  
   return response.json();
 }
 
@@ -154,8 +159,7 @@ function switchTab(name) {
   syncDatePills(name);
 
   // Skip "coming soon" tabs
-  if (name === 'twitter' || name === 'google-ads') {
-    if (name === 'google-ads') fetchGoogleAds();
+  if (name === 'twitter') {
     return;
   }
 
@@ -182,6 +186,7 @@ function loadTab(name) {
   else if (name === 'youtube') fetchYouTube();
   else if (name === 'linkedin') fetchLinkedIn();
   else if (name === 'social')  fetchSocial();
+  else if (name === 'google-ads') fetchGoogleAds();
 }
 
 // ── Sync date pills ────────────────────────────────────────────
@@ -202,7 +207,7 @@ function handleOrgChange(newOrg) {
   Object.keys(tabLoaded).forEach(k => delete tabLoaded[k]);
 
   // Restore any panels that were replaced with "not available"
-  ['tab-linkedin', 'tab-youtube', 'tab-social', 'tab-ga4', 'tab-gsc'].forEach(id => {
+  ['tab-linkedin', 'tab-youtube', 'tab-social', 'tab-ga4', 'tab-gsc', 'tab-google-ads'].forEach(id => {
     if (panelOriginalHTML[id]) restorePanel(id);
   });
 
@@ -232,7 +237,7 @@ function handleDateBtn(btn) {
   });
 
   // Reload current tab if it's one that uses days
-  if (activeTab !== 'youtube' && activeTab !== 'linkedin' && activeTab !== 'social' && activeTab !== 'twitter' && activeTab !== 'google-ads') {
+  if (activeTab !== 'youtube' && activeTab !== 'linkedin' && activeTab !== 'social' && activeTab !== 'twitter') {
     loadTab(activeTab);
   }
 }
@@ -479,17 +484,110 @@ async function fetchSocial() {
   }
 }
 
-// ── Google Ads (Coming Soon) ───────────────────────────────────
+// ── Google Ads ───────────────────────────────────────────────────
 async function fetchGoogleAds() {
+  const cacheKey = `google-ads-${currentOrg}-${currentDays}`;
+
+  if (currentOrg !== 'ravenlabs') {
+    showNotAvailable('tab-google-ads', 'Google Ads integration is only connected for Raven Labs.');
+    return;
+  }
+
+  resetKPIShimmer(['gads-clicks', 'gads-impressions', 'gads-cost', 'gads-conversions']);
+
   try {
-    const data = await apiFetch('google-ads');
-    const el = document.getElementById('gads-status');
-    if (el) el.textContent = data.message || 'Pending approval';
+    const data = await apiFetch(`google-ads?org=${currentOrg}&days=${currentDays}`);
+    if (data.error && data.error.includes('credentials not completely configured')) {
+        const panel = document.getElementById('tab-google-ads');
+        if (!panelOriginalHTML['tab-google-ads']) {
+          panelOriginalHTML['tab-google-ads'] = panel.innerHTML;
+        }
+        panel.innerHTML = `
+          <div class="yt-auth-panel" style="margin-top:2rem;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#EA4335" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+            <h3>Google Ads Not Connected</h3>
+            <p>You need to authorise access once to fetch live data.</p>
+            <a href="/admin/auth/google-ads" class="yt-auth-btn" style="background:#202124;">Authorise Google Ads</a>
+          </div>`;
+        return;
+    }
+
+    tabLoaded[cacheKey] = true;
+
+    updateKPI('gads-clicks', data.clicks.reduce((a, b) => a + b, 0));
+    updateKPI('gads-impressions', data.impressions.reduce((a, b) => a + b, 0));
+    updateKPI('gads-cost', '$' + data.cost.reduce((a, b) => a + b, 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+    updateKPI('gads-conversions', data.conversions.reduce((a, b) => a + b, 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1}));
+
+    const labels = data.dates.map(formatDate);
+    renderGadsChart(labels, data.clicks, data.conversions);
+
   } catch (err) {
     console.error('Google Ads fetch failed:', err);
-    const el = document.getElementById('gads-status');
-    if (el) el.textContent = 'Unavailable';
+    showKPIError(['gads-clicks', 'gads-impressions', 'gads-cost', 'gads-conversions']);
   }
+}
+
+function renderGadsChart(labels, clicks, conversions) {
+  const canvas = document.getElementById('gadsChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (gadsChartInstance) gadsChartInstance.destroy();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 280);
+  grad.addColorStop(0, 'rgba(66, 133, 244, 0.15)');
+  grad.addColorStop(1, 'rgba(66, 133, 244, 0.0)');
+
+  gadsChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Clicks',
+          data: clicks,
+          borderColor: '#4285F4',
+          backgroundColor: grad,
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          yAxisID: 'y',
+          pointBackgroundColor: '#fff',
+          pointBorderColor: '#4285F4',
+          pointRadius: 3,
+          pointHoverRadius: 5,
+        },
+        {
+          label: 'Conversions',
+          data: conversions,
+          borderColor: '#34A853',
+          borderWidth: 1.5,
+          borderDash: [5, 4],
+          fill: false,
+          tension: 0.4,
+          yAxisID: 'y1',
+          pointBackgroundColor: '#fff',
+          pointBorderColor: '#34A853',
+          pointRadius: 2,
+          pointHoverRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 6, font: { size: 11 } } },
+        tooltip: chartTooltip,
+      },
+      scales: {
+        y:  { type: 'linear', position: 'left',  beginAtZero: true, border: { display: false }, title: { display: true, text: 'Clicks', font: { size: 10 } } },
+        y1: { type: 'linear', position: 'right', beginAtZero: true, border: { display: false }, grid: { display: false }, title: { display: true, text: 'Conversions', font: { size: 10 } } },
+        x:  { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+      },
+    },
+  });
 }
 
 // ── Chart Tooltip Config ───────────────────────────────────────
@@ -799,11 +897,14 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Bind org switcher
-  const orgSwitcher = document.getElementById('org-switcher');
-  if (orgSwitcher) {
-    orgSwitcher.addEventListener('change', e => handleOrgChange(e.target.value));
-  }
+  // Bind org switcher (pill buttons)
+  document.querySelectorAll('.org-btn[data-org]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.org-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      handleOrgChange(btn.dataset.org);
+    });
+  });
 
   // Event delegation: date buttons and refresh buttons inside .content-area
   const contentArea = document.querySelector('.content-area');
