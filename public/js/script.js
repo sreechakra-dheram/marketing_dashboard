@@ -296,14 +296,15 @@ async function fetchGA4() {
 // ── GSC ────────────────────────────────────────────────────────
 async function fetchGSC() {
   const cacheKey = `gsc-${currentOrg}-${currentDays}`;
+  if (tabLoaded[cacheKey]) return;
   resetKPIShimmer(['total-clicks', 'total-impressions', 'avg-ctr', 'avg-position']);
   try {
     const data = await apiFetch(`gsc?org=${currentOrg}&days=${currentDays}`);
     tabLoaded[cacheKey] = true;
 
+    // ── KPIs ──
     updateKPI('total-clicks',      data.clicks.reduce((a, b) => a + b, 0));
     updateKPI('total-impressions', data.impressions.reduce((a, b) => a + b, 0));
-
     let avgCtr = '0%', avgPos = '0';
     if (data.ctr && data.ctr.length > 0) {
       avgCtr = (data.ctr.reduce((a, b) => a + b, 0) / data.ctr.length * 100).toFixed(2) + '%';
@@ -312,13 +313,67 @@ async function fetchGSC() {
     updateKPI('avg-ctr',      avgCtr);
     updateKPI('avg-position', avgPos);
 
-    const labels = data.dates.map(formatDate);
-    renderGSCChart(labels, data.clicks, data.impressions);
+    // ── Chart ──
+    renderGSCChart(data.dates.map(formatDate), data.clicks, data.impressions);
+
+    // ── Queries table ──
+    renderGSCTable('gsc-queries-body', data.queries || [], row => {
+      const short = row.query.length > 45 ? row.query.slice(0, 45) + '…' : row.query;
+      return `<td title="${row.query}">${short}</td><td>${row.clicks}</td><td>${row.impressions.toLocaleString()}</td><td>${row.ctr}%</td><td>${row.position}</td>`;
+    });
+
+    // ── Pages table ──
+    renderGSCTable('gsc-pages-body', data.pages || [], row => {
+      let path = row.page.replace(/^https?:\/\/[^/]+/, '') || '/';
+      if (path.length > 40) path = path.slice(0, 40) + '…';
+      return `<td title="${row.page}">${path}</td><td>${row.clicks}</td><td>${row.impressions.toLocaleString()}</td><td>${row.ctr}%</td><td>${row.position}</td>`;
+    });
+
+    // ── Country bars ──
+    renderGSCBars('gsc-countries-list', data.countries || [], r => r.country, r => r.clicks, COUNTRY_NAMES);
+
+    // ── Device bars ──
+    const deviceIcons = { Desktop: '🖥', Mobile: '📱', Tablet: '⬛' };
+    renderGSCBars('gsc-devices-list', data.devices || [], r => r.device, r => r.clicks, deviceIcons);
+
   } catch (err) {
     console.error('GSC fetch failed:', err);
     showKPIError(['total-clicks', 'total-impressions', 'avg-ctr', 'avg-position']);
   }
 }
+
+function renderGSCTable(tbodyId, rows, rowFn) {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  if (!rows.length) { el.innerHTML = '<tr><td colspan="5" class="breakdown-loading">No data</td></tr>'; return; }
+  el.innerHTML = rows.map(r => `<tr>${rowFn(r)}</tr>`).join('');
+}
+
+function renderGSCBars(containerId, rows, labelFn, valueFn, labelMap) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!rows.length) { el.innerHTML = '<p class="breakdown-loading">No data</p>'; return; }
+  const max = Math.max(...rows.map(valueFn), 1);
+  el.innerHTML = rows.map(r => {
+    const label = (labelMap && labelMap[labelFn(r)]) || labelFn(r);
+    const pct   = Math.round(valueFn(r) / max * 100);
+    return `
+      <div class="bar-row">
+        <span class="bar-label">${label}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <span class="bar-value">${valueFn(r).toLocaleString()}</span>
+      </div>`;
+  }).join('');
+}
+
+// Common 3-letter ISO → country name
+const COUNTRY_NAMES = {
+  AUS:'Australia', USA:'United States', GBR:'United Kingdom', IND:'India',
+  CAN:'Canada', SGP:'Singapore', NZL:'New Zealand', UAE:'UAE',
+  PHL:'Philippines', MYS:'Malaysia', ZAF:'South Africa', IRE:'Ireland',
+  DEU:'Germany', FRA:'France', NLD:'Netherlands', ITA:'Italy', ESP:'Spain',
+  JPN:'Japan', KOR:'South Korea', CHN:'China', HKG:'Hong Kong',
+};
 
 // ── YouTube ────────────────────────────────────────────────────
 // YouTube channel is RavenLabs only

@@ -516,6 +516,129 @@ body {
   font-weight: 500;
 }
 
+/* ── GSC Breakdown Sections ───────────────────────────── */
+.gsc-breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0;
+}
+
+.breakdown-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid rgba(226,232,240,0.8);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+
+.breakdown-header {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.breakdown-loading {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  padding: 1.25rem;
+}
+
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+.breakdown-table thead th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  background: #fafafa;
+  border-bottom: 1px solid #f1f5f9;
+  white-space: nowrap;
+}
+
+.breakdown-table thead th:not(:first-child) { text-align: right; }
+
+.breakdown-table tbody tr {
+  border-bottom: 1px solid #f8fafc;
+  transition: background 0.1s;
+}
+
+.breakdown-table tbody tr:last-child { border-bottom: none; }
+.breakdown-table tbody tr:hover { background: #fafbfc; }
+
+.breakdown-table tbody td {
+  padding: 0.55rem 0.75rem;
+  color: #334155;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown-table tbody td:not(:first-child) {
+  text-align: right;
+  color: #0f172a;
+  font-weight: 500;
+  max-width: none;
+}
+
+/* Bar chart rows (country / device) */
+.breakdown-bar-list { padding: 0.6rem 1.1rem; }
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.bar-row:last-child { margin-bottom: 0; }
+
+.bar-label {
+  font-size: 0.76rem;
+  color: #475569;
+  width: 110px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-track {
+  flex: 1;
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: #2563eb;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.bar-value {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #0f172a;
+  width: 40px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 /* ── Legacy Platform Sections (kept for other uses) ────── */
 .platform-section { margin-bottom: 1.75rem; }
 .platform-header  { display: flex; align-items: center; gap: 8px; margin-bottom: 0.75rem; }

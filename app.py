@@ -358,6 +358,21 @@ class AnalyticsService:
 
 class SearchConsoleService:
     @staticmethod
+    def _gsc_query(service, site_url, start_date, end_date, dimensions, row_limit=10):
+        body = {
+            "startDate": start_date,
+            "endDate":   end_date,
+            "dimensions": dimensions,
+            "rowLimit": row_limit,
+            "orderBy": [{"fieldName": "clicks", "sortOrder": "DESCENDING"}],
+        }
+        try:
+            return service.searchanalytics().query(siteUrl=site_url, body=body).execute()
+        except Exception as e:
+            print(f"GSC query error ({dimensions}): {e}")
+            return {}
+
+    @staticmethod
     def get_gsc_report(org: str = "ravenlabs", days: int = 7):
         site_url = GSC_SITE_URL.get(org)
         if not site_url:
@@ -369,31 +384,76 @@ class SearchConsoleService:
             )
             service = build("webmasters", "v3", credentials=credentials)
 
-            end_date = datetime.now() - timedelta(days=2)
-            start_date = end_date - timedelta(days=days - 1)
+            end_date   = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=days + 1)).strftime("%Y-%m-%d")
 
-            req_body = {
-                "startDate": start_date.strftime("%Y-%m-%d"),
-                "endDate": end_date.strftime("%Y-%m-%d"),
-                "dimensions": ["date"],
+            data = {
+                "dates": [], "clicks": [], "impressions": [], "ctr": [], "position": [],
+                "queries":   [],
+                "pages":     [],
+                "countries": [],
+                "devices":   [],
             }
 
-            response = (
-                service.searchanalytics()
-                .query(siteUrl=site_url, body=req_body)
-                .execute()
+            # ── Daily breakdown ──
+            daily = SearchConsoleService._gsc_query(
+                service, site_url, start_date, end_date, ["date"], row_limit=days + 5
             )
-
-            data = {"dates": [], "clicks": [], "impressions": [], "ctr": [], "position": []}
-
-            if "rows" in response:
-                sorted_rows = sorted(response["rows"], key=lambda row: row["keys"][0])
-                for row in sorted_rows:
+            if "rows" in daily:
+                for row in sorted(daily["rows"], key=lambda r: r["keys"][0]):
                     data["dates"].append(row["keys"][0].replace("-", ""))
                     data["clicks"].append(int(row["clicks"]))
                     data["impressions"].append(int(row["impressions"]))
                     data["ctr"].append(float(row["ctr"]))
                     data["position"].append(float(row["position"]))
+
+            # ── Top queries ──
+            queries = SearchConsoleService._gsc_query(
+                service, site_url, start_date, end_date, ["query"], row_limit=15
+            )
+            for row in queries.get("rows", []):
+                data["queries"].append({
+                    "query":       row["keys"][0],
+                    "clicks":      int(row["clicks"]),
+                    "impressions": int(row["impressions"]),
+                    "ctr":         round(row["ctr"] * 100, 1),
+                    "position":    round(row["position"], 1),
+                })
+
+            # ── Top pages ──
+            pages = SearchConsoleService._gsc_query(
+                service, site_url, start_date, end_date, ["page"], row_limit=15
+            )
+            for row in pages.get("rows", []):
+                data["pages"].append({
+                    "page":        row["keys"][0],
+                    "clicks":      int(row["clicks"]),
+                    "impressions": int(row["impressions"]),
+                    "ctr":         round(row["ctr"] * 100, 1),
+                    "position":    round(row["position"], 1),
+                })
+
+            # ── Country breakdown ──
+            countries = SearchConsoleService._gsc_query(
+                service, site_url, start_date, end_date, ["country"], row_limit=10
+            )
+            for row in countries.get("rows", []):
+                data["countries"].append({
+                    "country":     row["keys"][0].upper(),
+                    "clicks":      int(row["clicks"]),
+                    "impressions": int(row["impressions"]),
+                })
+
+            # ── Device breakdown ──
+            devices = SearchConsoleService._gsc_query(
+                service, site_url, start_date, end_date, ["device"], row_limit=5
+            )
+            for row in devices.get("rows", []):
+                data["devices"].append({
+                    "device":      row["keys"][0].capitalize(),
+                    "clicks":      int(row["clicks"]),
+                    "impressions": int(row["impressions"]),
+                })
 
             return data, 200
 

@@ -135,10 +135,40 @@
           <span class="kpi-context">Period average</span>
         </div>
       </div>
-      <div class="charts-grid charts-grid-full">
+      <div class="charts-grid charts-grid-full" style="margin-bottom:1.25rem;">
         <div class="chart-card">
           <div class="chart-title">Clicks &amp; Impressions</div>
           <div class="canvas-wrapper"><canvas id="gscChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Queries & Pages -->
+      <div class="gsc-breakdown-grid">
+        <div class="breakdown-card">
+          <div class="breakdown-header">Top Queries</div>
+          <table class="breakdown-table">
+            <thead><tr><th>Query</th><th>Clicks</th><th>Impr.</th><th>CTR</th><th>Pos.</th></tr></thead>
+            <tbody id="gsc-queries-body"><tr><td colspan="5" class="breakdown-loading">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="breakdown-card">
+          <div class="breakdown-header">Top Pages</div>
+          <table class="breakdown-table">
+            <thead><tr><th>Page</th><th>Clicks</th><th>Impr.</th><th>CTR</th><th>Pos.</th></tr></thead>
+            <tbody id="gsc-pages-body"><tr><td colspan="5" class="breakdown-loading">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Country & Device -->
+      <div class="gsc-breakdown-grid" style="margin-top:1rem;">
+        <div class="breakdown-card">
+          <div class="breakdown-header">By Country</div>
+          <div id="gsc-countries-list" class="breakdown-bar-list"></div>
+        </div>
+        <div class="breakdown-card">
+          <div class="breakdown-header">By Device</div>
+          <div id="gsc-devices-list" class="breakdown-bar-list"></div>
         </div>
       </div>
     </div>
